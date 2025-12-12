@@ -21,10 +21,9 @@ async function obtenerSeguimientoPorPedido(numeroPedido) {
       return { error: 'Faltan credenciales de Shopify', encontrado: false };
     }
 
+    // Buscar directamente por nombre del pedido (order_number)
     const apiUrl = `https://${SHOPIFY_SHOP}/admin/api/2025-10/orders.json`;
-
-    // 1. Obtener lista de pedidos (últimos 250)
-    const pedidosResponse = await fetch(`${apiUrl}?limit=250&status=any`, {
+    const pedidosResponse = await fetch(`${apiUrl}?name=${numeroPedido}&status=any`, {
       headers: {
         'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
         'Content-Type': 'application/json'
@@ -33,26 +32,24 @@ async function obtenerSeguimientoPorPedido(numeroPedido) {
 
     if (!pedidosResponse.ok) {
       console.error(`[ERROR] Shopify API respondió con status: ${pedidosResponse.status}`);
+      const errorText = await pedidosResponse.text();
+      console.error(`[ERROR] Respuesta:`, errorText);
       return { error: 'Error al consultar Shopify API', encontrado: false };
     }
 
     const pedidosData = await pedidosResponse.json();
+    
+    console.log(`[DEBUG SHOPIFY] Búsqueda por name=${numeroPedido}, resultados:`, pedidosData.orders?.length || 0);
 
     if (!pedidosData.orders || pedidosData.orders.length === 0) {
-      return { error: 'No se encontraron pedidos', encontrado: false };
-    }
-
-    // 2. Buscar el pedido por número de orden
-    const pedido = pedidosData.orders.find(
-      order => order.order_number.toString() === numeroPedido.toString()
-    );
-
-    if (!pedido) {
       return { 
         error: `Pedido #${numeroPedido} no encontrado`,
         encontrado: false 
       };
     }
+
+    // El primer resultado debería ser nuestro pedido
+    const pedido = pedidosData.orders[0];
 
     // 3. Extraer número de seguimiento
     let numeroSeguimiento = null;
