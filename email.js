@@ -1,9 +1,12 @@
 // email.js
 const { simpleParser } = require('mailparser');
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const { clasificarYResponder } = require('./classifier');
 const { logRespuesta, logError, logInfo } = require('./logger');
 const Imap = require('imap');
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 function iniciarEmailListener() {
   const imap = new Imap({
@@ -11,24 +14,16 @@ function iniciarEmailListener() {
     password: process.env.EMAIL_PASS,
     host: 'frezzyks-com.correoseguro.dinaserver.com',
     port: 993,
-    tls: true,
-    tlsOptions: { rejectUnauthorized: false },
-    connTimeout: 10000, // 10 segundos timeout
-    authTimeout: 5000    // 5 segundos auth timeout
+    tls: true
   });
 
   let lastSeqNumber = 0; // guarda el último número de secuencia procesado
 
   imap.once('ready', () => {
-    logInfo('✅ Conexión IMAP establecida correctamente');
     imap.openBox('INBOX', false, (err, box) => {
-      if (err) {
-        logError('IMAP', err, 'Error abriendo INBOX');
-        return;
-      }
+      if (err) throw err;
 
       lastSeqNumber = box.messages.total; // número total mensajes al iniciar
-      logInfo(`📧 Monitoreando bandeja de entrada (${lastSeqNumber} mensajes)`);
 
       imap.on('mail', (numNewMsgs) => {
         const fetchFrom = lastSeqNumber + 1;
@@ -53,13 +48,12 @@ function iniciarEmailListener() {
             });
 
             stream.once('end', async () => {
-              let destinatario = 'Desconocido';
               try {
                 const parsed = await simpleParser(buffer);
                 if (!parsed) return;
 
                 const texto = parsed.text;
-                destinatario = parsed.from?.value?.[0]?.address;
+                const destinatario = parsed.from?.value?.[0]?.address;
                 const messageId = parsed.messageId;
                 const subjectOriginal = parsed.subject || 'Sin asunto';
 
@@ -100,7 +94,7 @@ function iniciarEmailListener() {
 
               } catch (err) {
                 console.error('Error parseando mensaje:', err);
-                logError(destinatario, err, 'Error procesando email');
+                logError(destinatario || 'Desconocido', err, 'Error procesando email');
               }
             });
           });
@@ -121,53 +115,43 @@ function iniciarEmailListener() {
   });
 
   imap.once('error', (err) => {
-    console.error('❌ Error con IMAP:', err.message);
-    logError('IMAP', err, 'Error de conexión IMAP');
-    
-    // Reintentar conexión después de 30 segundos
-    setTimeout(() => {
-      console.log('🔄 Reintentando conexión IMAP...');
-      iniciarEmailListener();
-    }, 30000);
+    console.error('Error con IMAP:', err);
   });
 
   imap.once('end', () => {
-    console.log('⚠️  Conexión IMAP finalizada.');
-    logInfo('Conexión IMAP finalizada');
-    
-    // Reintentar conexión después de 10 segundos
-    setTimeout(() => {
-      console.log('🔄 Reconectando IMAP...');
-      iniciarEmailListener();
-    }, 10000);
+    console.log('Conexión IMAP finalizada.');
   });
 
   imap.connect();
-  console.log('🔌 Intentando conectar a servidor IMAP...');
 }
 
 async function enviarCorreo(destinatario, texto, messageId, subjectOriginal) {
-  let transporter = nodemailer.createTransport({
-    host: 'frezzyks-com.correoseguro.dinaserver.com',
-    port: 465,
-    secure: true,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
+  try {
+    // Añadir "Re:" sólo si no está ya en el asunto
+    let subject = subjectOriginal.startsWith('Re:') ? subjectOriginal : `Re: ${subjectOriginal}`;
+
+    const { data, error } = await resend.emails.send({
+      from: 'Soporte Frezzyks <contacto@frezzyks.com>',
+      to: [destinatario],
+      subject: subject,
+      text: texto,
+      headers: {
+        'In-Reply-To': messageId,
+        'References': messageId
+      }
+    });
+
+    if (error) {
+      console.error('Error enviando email con Resend:', error);
+      logError(destinatario, error, 'Error enviando email');
+      throw error;
     }
-  });
 
-  // Añadir "Re:" sólo si no está ya en el asunto
-  let subject = subjectOriginal.startsWith('Re:') ? subjectOriginal : `Re: ${subjectOriginal}`;
-
-  await transporter.sendMail({
-    from: `"Soporte" <${process.env.EMAIL_USER}>`,
-    to: destinatario,
-    subject: subject,
-    text: texto,
-    inReplyTo: messageId,         // Cabecera para hilo de respuesta
-    references: messageId         // Cabecera para hilo de respuesta
-  });
+    console.log('Email enviado correctamente:', data);
+  } catch (err) {
+    console.error('Error en enviarCorreo:', err);
+    throw err;
+  }
 }
 
 function mostrarUltimoEmail() {

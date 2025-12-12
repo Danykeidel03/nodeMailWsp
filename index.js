@@ -89,26 +89,15 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor iniciado en puerto ${PORT}`);
+app.listen(3000, () => {
+  console.log('Servidor iniciado en http://localhost:3000');
   console.log(`\nPara obtener el Access Token de Shopify, visita:`);
   console.log(`${process.env.NGROK_URL}/shopify/install?shop=${process.env.SHOPIFY_SHOP}\n`);
   
   logInfo('========== SERVIDOR INICIADO ==========');
-  logInfo(`Puerto: ${PORT}`);
+  logInfo('Email listener activado');
   
   //iniciarWhatsapp();
   //mostrarUltimoEmail();
-  
-  // Iniciar Email Listener con manejo de errores
-  try {
-    iniciarEmailListener();
-    logInfo('Email listener iniciado');
-  } catch (error) {
-    console.error('⚠️  Error iniciando email listener:', error.message);
-    logError('EmailListener', error, 'No se pudo iniciar el listener de emails');
-    console.log('⚠️  El servidor continuará funcionando sin monitoreo de emails');
-  }
+  iniciarEmailListener();
 });
