@@ -89,12 +89,15 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-app.listen(3000, () => {
-  console.log('Servidor iniciado en http://localhost:3000');
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor iniciado en puerto ${PORT}`);
   console.log(`\nPara obtener el Access Token de Shopify, visita:`);
   console.log(`${process.env.NGROK_URL}/shopify/install?shop=${process.env.SHOPIFY_SHOP}\n`);
   
   logInfo('========== SERVIDOR INICIADO ==========');
+  logInfo(`Puerto: ${PORT}`);
   
   //iniciarWhatsapp();
   //mostrarUltimoEmail();
