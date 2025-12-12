@@ -11,16 +11,24 @@ function iniciarEmailListener() {
     password: process.env.EMAIL_PASS,
     host: 'frezzyks-com.correoseguro.dinaserver.com',
     port: 993,
-    tls: true
+    tls: true,
+    tlsOptions: { rejectUnauthorized: false },
+    connTimeout: 10000, // 10 segundos timeout
+    authTimeout: 5000    // 5 segundos auth timeout
   });
 
   let lastSeqNumber = 0; // guarda el último número de secuencia procesado
 
   imap.once('ready', () => {
+    logInfo('✅ Conexión IMAP establecida correctamente');
     imap.openBox('INBOX', false, (err, box) => {
-      if (err) throw err;
+      if (err) {
+        logError('IMAP', err, 'Error abriendo INBOX');
+        return;
+      }
 
       lastSeqNumber = box.messages.total; // número total mensajes al iniciar
+      logInfo(`📧 Monitoreando bandeja de entrada (${lastSeqNumber} mensajes)`);
 
       imap.on('mail', (numNewMsgs) => {
         const fetchFrom = lastSeqNumber + 1;
@@ -45,12 +53,13 @@ function iniciarEmailListener() {
             });
 
             stream.once('end', async () => {
+              let destinatario = 'Desconocido';
               try {
                 const parsed = await simpleParser(buffer);
                 if (!parsed) return;
 
                 const texto = parsed.text;
-                const destinatario = parsed.from?.value?.[0]?.address;
+                destinatario = parsed.from?.value?.[0]?.address;
                 const messageId = parsed.messageId;
                 const subjectOriginal = parsed.subject || 'Sin asunto';
 
@@ -91,7 +100,7 @@ function iniciarEmailListener() {
 
               } catch (err) {
                 console.error('Error parseando mensaje:', err);
-                logError(destinatario || 'Desconocido', err, 'Error procesando email');
+                logError(destinatario, err, 'Error procesando email');
               }
             });
           });
@@ -112,14 +121,29 @@ function iniciarEmailListener() {
   });
 
   imap.once('error', (err) => {
-    console.error('Error con IMAP:', err);
+    console.error('❌ Error con IMAP:', err.message);
+    logError('IMAP', err, 'Error de conexión IMAP');
+    
+    // Reintentar conexión después de 30 segundos
+    setTimeout(() => {
+      console.log('🔄 Reintentando conexión IMAP...');
+      iniciarEmailListener();
+    }, 30000);
   });
 
   imap.once('end', () => {
-    console.log('Conexión IMAP finalizada.');
+    console.log('⚠️  Conexión IMAP finalizada.');
+    logInfo('Conexión IMAP finalizada');
+    
+    // Reintentar conexión después de 10 segundos
+    setTimeout(() => {
+      console.log('🔄 Reconectando IMAP...');
+      iniciarEmailListener();
+    }, 10000);
   });
 
   imap.connect();
+  console.log('🔌 Intentando conectar a servidor IMAP...');
 }
 
 async function enviarCorreo(destinatario, texto, messageId, subjectOriginal) {

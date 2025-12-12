@@ -95,9 +95,17 @@ app.listen(3000, () => {
   console.log(`${process.env.NGROK_URL}/shopify/install?shop=${process.env.SHOPIFY_SHOP}\n`);
   
   logInfo('========== SERVIDOR INICIADO ==========');
-  logInfo('Email listener activado');
   
   //iniciarWhatsapp();
   //mostrarUltimoEmail();
-  iniciarEmailListener();
+  
+  // Iniciar Email Listener con manejo de errores
+  try {
+    iniciarEmailListener();
+    logInfo('Email listener iniciado');
+  } catch (error) {
+    console.error('⚠️  Error iniciando email listener:', error.message);
+    logError('EmailListener', error, 'No se pudo iniciar el listener de emails');
+    console.log('⚠️  El servidor continuará funcionando sin monitoreo de emails');
+  }
 });
