@@ -5,6 +5,13 @@ const { obtenerSeguimientoPorPedido } = require('./shopify');
 const { obtenerEstadoEnvio } = require('./seguimiento');
 const { logError } = require('./logger');
 
+// Validar que OPENAI_API_KEY esté presente
+if (!process.env.OPENAI_API_KEY) {
+  console.error('❌ ERROR CRÍTICO: OPENAI_API_KEY no está configurado');
+  console.error('Por favor, configura esta variable de entorno en Railway');
+  process.exit(1);
+}
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function obtenerEstadoSeguimiento(numeroSeguimiento) {
