@@ -85,9 +85,11 @@ async function clasificarYResponder(mensaje, destinatario, asunto) {
   try {
     if (matchPedido) {
       numeroPedido = matchPedido[1] || matchPedido[2];
+      console.log(`[DEBUG] Pedido detectado: #${numeroPedido}`);
       
       // Obtener número de seguimiento y estado del pedido
       const infoPedidoShopify = await obtenerSeguimientoPorPedido(numeroPedido);
+      console.log(`[DEBUG] Respuesta Shopify:`, JSON.stringify(infoPedidoShopify, null, 2));
       
       if (infoPedidoShopify.encontrado) {
         if (infoPedidoShopify.numeroSeguimiento) {

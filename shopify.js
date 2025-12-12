@@ -8,8 +8,13 @@ const fetch = require('node-fetch');
  */
 async function obtenerSeguimientoPorPedido(numeroPedido) {
   try {
+    console.log(`[DEBUG SHOPIFY] Buscando pedido #${numeroPedido}`);
+    
     const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
     const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+    
+    console.log(`[DEBUG SHOPIFY] SHOPIFY_SHOP: ${SHOPIFY_SHOP ? 'configurado' : 'NO configurado'}`);
+    console.log(`[DEBUG SHOPIFY] SHOPIFY_ACCESS_TOKEN: ${SHOPIFY_ACCESS_TOKEN ? 'configurado' : 'NO configurado'}`);
     
     if (!SHOPIFY_SHOP || !SHOPIFY_ACCESS_TOKEN) {
       console.error('[ERROR] Faltan credenciales de Shopify en .env (SHOPIFY_SHOP o SHOPIFY_ACCESS_TOKEN)');
