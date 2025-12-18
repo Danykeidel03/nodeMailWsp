@@ -87,9 +87,8 @@ function iniciarEmailListener() {
                   await enviarCorreo(destinatarioFinal, respuesta.mensaje, messageId, subjectOriginal);
                   logRespuesta(destinatarioFinal, respuesta.mensaje, 'EMAIL');
                 } else if (typeof respuesta === 'string') {
-                  const mensajeToSoporte = `Usuario: ${destinatario}\nMensaje: ${texto}`
-                  await enviarCorreo(destinatarioFinal, mensajeToSoporte, messageId, subjectOriginal);
-                  logRespuesta(destinatarioFinal, mensajeToSoporte, 'EMAIL');
+                  await enviarCorreo(destinatarioFinal, texto, messageId, subjectOriginal);
+                  logRespuesta(destinatarioFinal, texto, 'EMAIL');
                 }
 
               } catch (err) {
