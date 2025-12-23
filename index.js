@@ -2,7 +2,6 @@
 require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
-const fetch = require('node-fetch');
 const { iniciarWhatsapp } = require('./whatsapp');
 const { iniciarEmailListener, mostrarUltimoEmail } = require('./email');
 const { enviarMensajeWhatsapp } = require('./whatsapp');
@@ -94,28 +93,15 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor iniciado en puerto ${PORT}`);
+app.listen(3000, () => {
+  console.log('Servidor iniciado en http://localhost:3000');
   console.log(`\nPara obtener el Access Token de Shopify, visita:`);
   console.log(`${process.env.NGROK_URL}/shopify/install?shop=${process.env.SHOPIFY_SHOP}\n`);
   
   logInfo('========== SERVIDOR INICIADO ==========');
-
-  // Solo activar email listener en desarrollo
-  if (process.env.ENABLE_EMAIL_LISTENER === 'true') {
-    (async () => {
-      try {
-        logInfo('Iniciando Email listener...');
-        await iniciarEmailListener();
-        logInfo('✅ Email listener iniciado correctamente');
-      } catch (err) {
-        console.error('❌ Error iniciando Email Listener:', err.message);
-        console.error(err);
-      }
-    })();
-  } else {
-    logInfo('Email listener deshabilitado (ENABLE_EMAIL_LISTENER=false)');
-  }
+  logInfo('Email listener activado');
+  
+  //iniciarWhatsapp();
+  //mostrarUltimoEmail();
+  iniciarEmailListener();
 });
