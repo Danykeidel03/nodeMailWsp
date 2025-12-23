@@ -2,6 +2,7 @@
 require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
+const fetch = require('node-fetch');
 const { iniciarWhatsapp } = require('./whatsapp');
 const { iniciarEmailListener, mostrarUltimoEmail } = require('./email');
 const { enviarMensajeWhatsapp } = require('./whatsapp');
@@ -89,15 +90,15 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-app.listen(3000, () => {
-  console.log('Servidor iniciado en http://localhost:3000');
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Servidor iniciado en puerto ${PORT}`);
   console.log(`\nPara obtener el Access Token de Shopify, visita:`);
   console.log(`${process.env.NGROK_URL}/shopify/install?shop=${process.env.SHOPIFY_SHOP}\n`);
   
   logInfo('========== SERVIDOR INICIADO ==========');
   logInfo('Email listener activado');
   
-  //iniciarWhatsapp();
-  //mostrarUltimoEmail();
   iniciarEmailListener();
 });
