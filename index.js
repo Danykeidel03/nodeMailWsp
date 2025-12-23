@@ -98,7 +98,20 @@ app.listen(PORT, () => {
   console.log(`${process.env.NGROK_URL}/shopify/install?shop=${process.env.SHOPIFY_SHOP}\n`);
   
   logInfo('========== SERVIDOR INICIADO ==========');
-  logInfo('Email listener activado');
-  
-  iniciarEmailListener();
+
+  // Solo activar email listener en desarrollo
+  if (process.env.ENABLE_EMAIL_LISTENER === 'true') {
+    (async () => {
+      try {
+        logInfo('Iniciando Email listener...');
+        await iniciarEmailListener();
+        logInfo('✅ Email listener iniciado correctamente');
+      } catch (err) {
+        console.error('❌ Error iniciando Email Listener:', err.message);
+        console.error(err);
+      }
+    })();
+  } else {
+    logInfo('Email listener deshabilitado (ENABLE_EMAIL_LISTENER=false)');
+  }
 });
