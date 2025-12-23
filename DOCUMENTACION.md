@@ -18,7 +18,8 @@
 10. [Despliegue en Railway](#despliegue-en-railway)
 11. [Variables de Entorno](#variables-de-entorno)
 12. [Flujo de Funcionamiento Actual](#flujo-de-funcionamiento-actual)
-13. [Comandos Útiles](#comandos-útiles)
+13. [Sistema de Notificaciones de Errores](#sistema-de-notificaciones-de-errores)
+14. [Comandos Útiles](#comandos-útiles)
 
 ---
 
@@ -720,6 +721,9 @@ EMAIL_PASS=PRyi6H5:/5$1
 
 # Resend API (para envío de emails)
 RESEND_API_KEY=re_BLRaLRGF_CcxDor6KkgYDxDPexe8LLtsx
+
+# Correo para notificaciones de errores
+ADMIN_EMAIL=tu-correo@ejemplo.com
 
 # Shopify
 SHOPIFY_SHOP_NAME=frezzyks
