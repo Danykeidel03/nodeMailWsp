@@ -67,28 +67,31 @@ function iniciarEmailListener() {
                 const respuesta = await clasificarYResponder(texto, destinatario, subjectOriginal);
                 console.log(respuesta);
 
-                let destinatarioFinal = destinatario;
-
+                // Manejo de casos especiales (derivación a humanos)
                 if (respuesta === 'SOPORTE') {
-                  destinatarioFinal = 'soporte@frezzyks.com';
+                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
                   logInfo(`Email derivado a SOPORTE desde ${destinatario}`);
+                  return;
                 } else if (respuesta === 'SAMU') {
-                  destinatarioFinal = 'samu@frezzyks.com';
+                  await reenviarCorreo('samu@frezzyks.com', destinatario, texto, subjectOriginal);
                   logInfo(`Email derivado a SAMU desde ${destinatario}`);
+                  return;
                 } else if (respuesta === 'NECESITA_PERSONA') {
-                  destinatarioFinal = 'soporte@frezzyks.com';
+                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
                   logInfo(`Email requiere atención humana de ${destinatario}`);
+                  return;
                 } else if (respuesta === 'SIN_RESPUESTA') {
-                    logInfo(`Sin respuesta necesaria para ${destinatario}`);
-                    return;
+                  logInfo(`Sin respuesta necesaria para ${destinatario}`);
+                  return;
                 }
 
+                // Respuesta automática al cliente
                 if (respuesta && typeof respuesta === 'object' && respuesta.mensaje) {
-                  await enviarCorreo(destinatarioFinal, respuesta.mensaje, messageId, subjectOriginal);
-                  logRespuesta(destinatarioFinal, respuesta.mensaje, 'EMAIL');
-                } else if (typeof respuesta === 'string') {
-                  await enviarCorreo(destinatarioFinal, texto, messageId, subjectOriginal);
-                  logRespuesta(destinatarioFinal, texto, 'EMAIL');
+                  await enviarCorreo(destinatario, respuesta.mensaje, messageId, subjectOriginal);
+                  logRespuesta(destinatario, respuesta.mensaje, 'EMAIL');
+                } else if (typeof respuesta === 'string' && respuesta !== 'SOPORTE' && respuesta !== 'SAMU' && respuesta !== 'NECESITA_PERSONA') {
+                  await enviarCorreo(destinatario, texto, messageId, subjectOriginal);
+                  logRespuesta(destinatario, texto, 'EMAIL');
                 }
 
               } catch (err) {
@@ -149,6 +152,41 @@ async function enviarCorreo(destinatario, texto, messageId, subjectOriginal) {
     console.log('Email enviado correctamente:', data);
   } catch (err) {
     console.error('Error en enviarCorreo:', err);
+    throw err;
+  }
+}
+
+async function reenviarCorreo(destinatarioEquipo, remitenteOriginal, textoOriginal, subjectOriginal) {
+  try {
+    // Asunto con formato de reenvío
+    let subject = subjectOriginal.startsWith('Fwd:') ? subjectOriginal : `Fwd: ${subjectOriginal}`;
+    
+    // Cuerpo con información del remitente original
+    const cuerpoReenvio = `
+---------- Mensaje reenviado ----------
+De: ${remitenteOriginal}
+Asunto: ${subjectOriginal}
+
+${textoOriginal}
+`;
+
+    const { data, error } = await resend.emails.send({
+      from: 'Soporte Frezzyks <contacto@frezzyks.com>',
+      to: [destinatarioEquipo],
+      subject: subject,
+      text: cuerpoReenvio,
+      reply_to: remitenteOriginal // Para que las respuestas vayan al cliente original
+    });
+
+    if (error) {
+      console.error('Error reenviando email con Resend:', error);
+      logError(destinatarioEquipo, error, 'Error reenviando email');
+      throw error;
+    }
+
+    console.log('Email reenviado correctamente a', destinatarioEquipo, '- Cliente original:', remitenteOriginal);
+  } catch (err) {
+    console.error('Error en reenviarCorreo:', err);
     throw err;
   }
 }
