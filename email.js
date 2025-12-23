@@ -209,53 +209,7 @@ function mostrarUltimoEmail() {
   imap.connect();
 }
 
-async function enviarNotificacionError(error, contexto = '') {
-  try {
-    const correoAdmin = process.env.ADMIN_EMAIL || 'tu-correo@ejemplo.com';
-    const ambiente = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV || 'development';
-    const fecha = new Date().toLocaleString('es-ES', { timeZone: 'America/Mexico_City' });
-    
-    const subject = `🚨 Error en Railway - ${ambiente}`;
-    const mensaje = `
-=== ERROR EN APLICACIÓN ===
-Ambiente: ${ambiente}
-Fecha: ${fecha}
-Contexto: ${contexto}
-
---- Stack Trace ---
-${error.stack || error.message || error}
-
---- Detalles del Error ---
-Nombre: ${error.name || 'Error'}
-Mensaje: ${error.message || 'Sin mensaje'}
-
---- Información del Sistema ---
-Node Version: ${process.version}
-Plataforma: ${process.platform}
-Memoria Usada: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB
-===========================
-    `;
-
-    const { data, error: resendError } = await resend.emails.send({
-      from: 'Alertas Frezzyks <contacto@frezzyks.com>',
-      to: [correoAdmin],
-      subject: subject,
-      text: mensaje
-    });
-
-    if (resendError) {
-      console.error('❌ Error enviando notificación de error:', resendError);
-    } else {
-      console.log('✅ Notificación de error enviada al admin:', data);
-    }
-  } catch (err) {
-    // Si falla el envío, al menos lo registramos en consola
-    console.error('❌ Error crítico al enviar notificación:', err);
-  }
-}
-
 module.exports = {
   iniciarEmailListener,
-  mostrarUltimoEmail,
-  enviarNotificacionError
+  mostrarUltimoEmail
 };

@@ -3,7 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
 const { iniciarWhatsapp } = require('./whatsapp');
-const { iniciarEmailListener, mostrarUltimoEmail, enviarNotificacionError } = require('./email');
+const { iniciarEmailListener, mostrarUltimoEmail } = require('./email');
 const { enviarMensajeWhatsapp } = require('./whatsapp');
 const { clasificarYResponder } = require('./classifier');
 const { logInfo } = require('./logger');
@@ -89,42 +89,6 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-// Middleware de manejo de errores de Express (debe ir después de todas las rutas)
-app.use((err, req, res, next) => {
-  console.error('❌ Error en Express:', err);
-  logError('Express', err, `Error en ${req.method} ${req.path}`);
-  
-  // Enviar notificación al admin
-  enviarNotificacionError(err, `Error en ruta ${req.method} ${req.path}`).catch(console.error);
-  
-  res.status(500).json({ error: 'Error interno del servidor' });
-});
-
-// Manejador de excepciones no capturadas
-process.on('uncaughtException', (error) => {
-  console.error('❌ UNCAUGHT EXCEPTION:', error);
-  logError('System', error, 'Excepción no capturada');
-  
-  // Enviar notificación al admin
-  enviarNotificacionError(error, 'Excepción no capturada (uncaughtException)')
-    .finally(() => {
-      // Dar tiempo para que se envíe el email antes de salir
-      setTimeout(() => {
-        process.exit(1);
-      }, 2000);
-    });
-});
-
-// Manejador de promesas rechazadas no manejadas
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ UNHANDLED REJECTION:', reason);
-  const error = reason instanceof Error ? reason : new Error(String(reason));
-  logError('System', error, 'Promise rechazada no manejada');
-  
-  // Enviar notificación al admin
-  enviarNotificacionError(error, 'Promise rechazada no manejada (unhandledRejection)').catch(console.error);
-});
-
 app.listen(3000, () => {
   console.log('Servidor iniciado en http://localhost:3000');
   console.log(`\nPara obtener el Access Token de Shopify, visita:`);
@@ -132,7 +96,6 @@ app.listen(3000, () => {
   
   logInfo('========== SERVIDOR INICIADO ==========');
   logInfo('Email listener activado');
-  logInfo('Sistema de notificación de errores activado');
   
   //iniciarWhatsapp();
   //mostrarUltimoEmail();
