@@ -250,7 +250,7 @@ Si se menciona alguno de los siguientes temas:
 
 
   const completion = await openai.chat.completions.create({
-    model: 'gpt-3.5-turbo',
+    model: 'gpt-4o-mini',
     messages: [
       { role: 'system', content: prompt },
       { role: 'user', content: mensaje }
