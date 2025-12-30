@@ -156,8 +156,6 @@ IMPORTANTE: Incluir el enlace de seguimiento en la respuesta de forma amigable.
     }
   }
 
-  if (mensaje.toLowerCase().includes('persona')) return null;
-
   // Construir contexto de conversación previa si existe
   let contextoConversacion = '';
   if (historialConversacion && historialConversacion.length > 0) {
@@ -262,6 +260,23 @@ Si se menciona alguno de los siguientes temas:
 •⁠  ⁠Temas no reconocidos o muy sensibles (denuncias, problemas legales, facturación compleja, etc.) → responde únicamente con la palabra SAMU (sin añadir nada más).
 
 •⁠  ⁠Si el correo proviene de una dirección tipo "noreply" o similar (donde no se espera respuesta del cliente), ADEMAS COSAS QUE VENGAN DEL PROPIO FREZZYKS COMO PROCTOS CON POCAS EXISTENCIAS O NEW SUBSCRIBER TO FREZZYKS O SPAM → responde únicamente con la palabra SIN_RESPUESTA (sin añadir nada más).
+
+---
+
+⚠️ REGLAS CRÍTICAS DE SEGURIDAD (OBLIGATORIAS):
+
+1. NUNCA incluyas en tu respuesta las palabras: "NECESITA_PERSONA", "SOPORTE", "SAMU", "SIN_RESPUESTA".
+   Estas son etiquetas internas del sistema, NO texto para clientes.
+
+2. Si no puedes ayudar o necesitas escalar → responde SOLO con la palabra exacta: NECESITA_PERSONA
+   NO escribas: "Necesita_persona..." o "Esto necesita persona..." 
+   SOLO: NECESITA_PERSONA (nada más)
+
+3. Si detectas un tema que debe ir a SOPORTE → responde SOLO: SOPORTE
+   Si detectas un tema que debe ir a SAMU → responde SOLO: SAMU
+   Si no requiere respuesta → responde SOLO: SIN_RESPUESTA
+
+4. Cualquier otra respuesta DEBE ser un mensaje completo y profesional para el cliente.
 
 `;
 

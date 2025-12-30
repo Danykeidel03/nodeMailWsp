@@ -7,6 +7,7 @@ const { iniciarEmailListener, mostrarUltimoEmail } = require('./email');
 const { enviarMensajeWhatsapp } = require('./whatsapp');
 const { clasificarYResponder } = require('./classifier');
 const { logInfo } = require('./logger');
+const { obtenerMetricas, mostrarMetricas } = require('./metricas');
 
 const app = express();
 app.use(express.json());
@@ -93,12 +94,167 @@ const PORT = process.env.PORT || 3000;
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
+// Endpoint para ver métricas en tiempo real
+app.get('/metricas', (req, res) => {
+  const metricas = obtenerMetricas();
+  
+  // Formatear como HTML para mejor visualización
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Métricas del Bot</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <meta http-equiv="refresh" content="30">
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+          max-width: 900px;
+          margin: 40px auto;
+          padding: 20px;
+          background: #f5f5f5;
+        }
+        .container {
+          background: white;
+          padding: 30px;
+          border-radius: 8px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+          color: #333;
+          border-bottom: 3px solid #4CAF50;
+          padding-bottom: 10px;
+        }
+        .metric {
+          display: flex;
+          justify-content: space-between;
+          padding: 12px 0;
+          border-bottom: 1px solid #eee;
+        }
+        .metric-label {
+          font-weight: 500;
+          color: #555;
+        }
+        .metric-value {
+          font-weight: 600;
+          color: #333;
+        }
+        .section {
+          margin-top: 30px;
+        }
+        .section-title {
+          font-size: 18px;
+          font-weight: 600;
+          color: #4CAF50;
+          margin-bottom: 15px;
+        }
+        .success { color: #4CAF50; }
+        .warning { color: #FF9800; }
+        .danger { color: #F44336; }
+        .info { color: #2196F3; }
+        .refresh-note {
+          text-align: center;
+          color: #999;
+          font-size: 14px;
+          margin-top: 20px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>📊 Métricas del Bot de Clasificación</h1>
+        
+        <div class="metric">
+          <span class="metric-label">⏱️ Tiempo activo</span>
+          <span class="metric-value">${metricas.tiempoActivo}</span>
+        </div>
+        
+        <div class="metric">
+          <span class="metric-label">📧 Total emails recibidos</span>
+          <span class="metric-value">${metricas.total}</span>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">Procesamiento</div>
+          <div class="metric">
+            <span class="metric-label">✅ Emails automatizados</span>
+            <span class="metric-value success">${metricas.automatizados} (${metricas.porcentajeAutomatizacion})</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">👥 Escalados a soporte</span>
+            <span class="metric-value warning">${metricas.escaladosSoporte}</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">👔 Escalados a Samu</span>
+            <span class="metric-value warning">${metricas.escaladosSamu}</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">🔇 Ignorados (sin respuesta)</span>
+            <span class="metric-value">${metricas.ignorados}</span>
+          </div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">🛡️ Seguridad</div>
+          <div class="metric">
+            <span class="metric-label">🚫 Duplicados bloqueados</span>
+            <span class="metric-value info">${metricas.duplicadosBloqueados}</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">📮 Intermediarios bloqueados</span>
+            <span class="metric-value info">${metricas.intermediariosBloqueados}</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">📰 Newsletters ignoradas</span>
+            <span class="metric-value info">${metricas.newslettersIgnoradas}</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">🛡️ Guard-rails activados</span>
+            <span class="metric-value ${metricas.guardrailsActivados > 0 ? 'danger' : 'success'}">${metricas.guardrailsActivados}</span>
+          </div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">Rendimiento</div>
+          <div class="metric">
+            <span class="metric-label">⚡ Tiempo promedio de respuesta</span>
+            <span class="metric-value">${metricas.tiempoPromedioRespuesta}</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">⚠️ Errores</span>
+            <span class="metric-value ${metricas.errores > 0 ? 'danger' : 'success'}">${metricas.errores}</span>
+          </div>
+        </div>
+        
+        <div class="refresh-note">
+          🔄 Página se actualiza automáticamente cada 30 segundos<br>
+          Última actualización: ${new Date().toLocaleString('es-ES')}
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+  
+  res.send(html);
+});
+
+// Endpoint JSON para métricas (para APIs o monitoreo)
+app.get('/metricas/json', (req, res) => {
+  const metricas = obtenerMetricas();
+  res.json(metricas);
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Servidor iniciado en puerto ${PORT}`);
   console.log(`Para obtener el Access Token de Shopify, visita:`);
   console.log(`${process.env.NGROK_URL}/shopify/install?shop=${process.env.SHOPIFY_SHOP}\n`);
+  console.log(`📊 Métricas disponibles en: http://localhost:${PORT}/metricas\n`);
 
   logInfo('========== SERVIDOR INICIADO ==========');
+  
+  // Mostrar métricas iniciales
+  mostrarMetricas();
 
   // Inicia listeners de manera segura después del deploy
   (async () => {
