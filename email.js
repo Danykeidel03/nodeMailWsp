@@ -8,6 +8,51 @@ const Imap = require('imap');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// Almacenamiento temporal de hilos de conversación
+// Clave: email del destinatario + references/in-reply-to
+// Valor: array de mensajes [{rol: 'cliente'|'bot', texto: '...', timestamp: ...}]
+const hilosConversacion = new Map();
+
+// Limpiar hilos antiguos (más de 24 horas)
+setInterval(() => {
+  const ahora = Date.now();
+  const TIEMPO_EXPIRACION = 24 * 60 * 60 * 1000; // 24 horas
+  
+  for (const [clave, hilo] of hilosConversacion.entries()) {
+    const ultimoMensaje = hilo[hilo.length - 1];
+    if (ultimoMensaje && (ahora - ultimoMensaje.timestamp > TIEMPO_EXPIRACION)) {
+      hilosConversacion.delete(clave);
+    }
+  }
+}, 60 * 60 * 1000); // Revisar cada hora
+
+function obtenerClaveHilo(destinatario, references, inReplyTo, messageId) {
+  // Usar references o in-reply-to para identificar el hilo
+  const threadId = references || inReplyTo || messageId;
+  return `${destinatario}:${threadId}`;
+}
+
+function agregarMensajeAHilo(clave, rol, texto) {
+  if (!hilosConversacion.has(clave)) {
+    hilosConversacion.set(clave, []);
+  }
+  hilosConversacion.get(clave).push({
+    rol,
+    texto,
+    timestamp: Date.now()
+  });
+  
+  // Limitar el historial a los últimos 10 mensajes para no saturar el contexto
+  const hilo = hilosConversacion.get(clave);
+  if (hilo.length > 10) {
+    hilosConversacion.set(clave, hilo.slice(-10));
+  }
+}
+
+function obtenerHistorialHilo(clave) {
+  return hilosConversacion.get(clave) || [];
+}
+
 function iniciarEmailListener() {
   const imap = new Imap({
     user: process.env.EMAIL_USER,
@@ -56,15 +101,24 @@ function iniciarEmailListener() {
                 const destinatario = parsed.from?.value?.[0]?.address;
                 const messageId = parsed.messageId;
                 const subjectOriginal = parsed.subject || 'Sin asunto';
+                const references = parsed.references ? parsed.references.join(' ') : null;
+                const inReplyTo = parsed.inReplyTo;
 
                 if (!texto || !destinatario) {
                   console.log('Correo incompleto');
                   return;
                 }
 
-                logInfo(`Nuevo email de ${destinatario} - Asunto: ${subjectOriginal}`);
+                // Identificar el hilo de conversación
+                const claveHilo = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
+                const historial = obtenerHistorialHilo(claveHilo);
+                
+                // Agregar el mensaje del cliente al historial
+                agregarMensajeAHilo(claveHilo, 'cliente', texto);
 
-                const respuesta = await clasificarYResponder(texto, destinatario, subjectOriginal);
+                logInfo(`Nuevo email de ${destinatario} - Asunto: ${subjectOriginal} - Hilo: ${historial.length} mensajes previos`);
+
+                const respuesta = await clasificarYResponder(texto, destinatario, subjectOriginal, historial);
                 console.log(respuesta);
 
                 // Manejo de casos especiales (derivación a humanos)
@@ -87,9 +141,15 @@ function iniciarEmailListener() {
 
                 // Respuesta automática al cliente
                 if (respuesta && typeof respuesta === 'object' && respuesta.mensaje) {
+                  // Agregar la respuesta del bot al historial
+                  agregarMensajeAHilo(claveHilo, 'bot', respuesta.mensaje);
+                  
                   await enviarCorreo(destinatario, respuesta.mensaje, messageId, subjectOriginal);
                   logRespuesta(destinatario, respuesta.mensaje, 'EMAIL');
                 } else if (typeof respuesta === 'string' && respuesta !== 'SOPORTE' && respuesta !== 'SAMU' && respuesta !== 'NECESITA_PERSONA') {
+                  // Agregar la respuesta del bot al historial
+                  agregarMensajeAHilo(claveHilo, 'bot', texto);
+                  
                   await enviarCorreo(destinatario, texto, messageId, subjectOriginal);
                   logRespuesta(destinatario, texto, 'EMAIL');
                 }

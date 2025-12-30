@@ -71,7 +71,7 @@ async function obtenerEstadoSeguimiento(numeroSeguimiento) {
   }
 }
 
-async function clasificarYResponder(mensaje, destinatario, asunto) {
+async function clasificarYResponder(mensaje, destinatario, asunto, historialConversacion = []) {
   let infoPedido = '';
   let infoSeguimiento = '';
   let estadoCompletoDisponible = false;
@@ -158,6 +158,16 @@ IMPORTANTE: Incluir el enlace de seguimiento en la respuesta de forma amigable.
 
   if (mensaje.toLowerCase().includes('persona')) return null;
 
+  // Construir contexto de conversación previa si existe
+  let contextoConversacion = '';
+  if (historialConversacion && historialConversacion.length > 0) {
+    contextoConversacion = '\n--- HISTORIAL DE LA CONVERSACIÓN ---\n';
+    historialConversacion.forEach((msg, idx) => {
+      contextoConversacion += `${msg.rol === 'bot' ? 'TÚ (Bot)' : 'Cliente'}: ${msg.texto}\n`;
+    });
+    contextoConversacion += '--- FIN DEL HISTORIAL ---\n\n';
+  }
+
   const prompt = `
 Eres el asistente virtual de atención al cliente de *Frezzyks*, una tienda online de golosinas liofilizadas y marshmallows gourmet. Tu estilo es:
 
@@ -165,7 +175,14 @@ Eres el asistente virtual de atención al cliente de *Frezzyks*, una tienda onli
 •⁠  ⁠Tuteas siempre.
 •⁠  ⁠Escribes como un/a joven majo/a y profesional (sin forzar jerga ni bromas raras).
 •⁠  ⁠Usas emojis solo al final de frases (máximo 2), y solo si el contexto lo permite.
-•⁠  ⁠Cierras siempre con: “Un saludo!!, equipo Frezzyks 🍬” (salvo en WhatsApp, donde puede ser más corto).
+•⁠  ⁠Cierras siempre con: "Un saludo!!, equipo Frezzyks 🍬" (salvo en WhatsApp, donde puede ser más corto).
+
+${contextoConversacion}IMPORTANTE SOBRE EL HISTORIAL:
+- Si ya respondiste una pregunta anteriormente en este hilo, NO REPITAS la información completa de nuevo.
+- Si el cliente te da las gracias, simplemente responde amablemente (ej: "De nada! Para lo que necesites aquí estamos 😊") SIN repetir toda la información anterior.
+- Si el cliente hace una pregunta de seguimiento relacionada, responde solo esa nueva pregunta específica.
+- Si el cliente pregunta algo totalmente nuevo, entonces sí puedes dar información completa.
+- Mantén las respuestas de seguimiento cortas y naturales, como en una conversación real.
 
 ---
 ${infoPedido ? 'INFO PEDIDO PARA EL CLIENTE:\n' + infoPedido + '\n' : ''}${infoSeguimiento ? infoSeguimiento + '\n' : ''}---
