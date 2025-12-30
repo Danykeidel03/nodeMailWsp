@@ -186,16 +186,17 @@ function iniciarEmailListener() {
 
             stream.once('end', async () => {
               const tiempoInicio = Date.now();
+              let destinatario = 'Desconocido'; // Variable definida aquí para acceso en catch
               
               try {
                 const parsed = await simpleParser(buffer);
                 if (!parsed) return;
 
                 const texto = parsed.text;
-                const destinatario = parsed.from?.value?.[0]?.address;
+                destinatario = parsed.from?.value?.[0]?.address;
                 const messageId = parsed.messageId;
                 const subjectOriginal = parsed.subject || 'Sin asunto';
-                const references = parsed.references ? parsed.references.join(' ') : null;
+                const references = parsed.references ? (Array.isArray(parsed.references) ? parsed.references.join(' ') : parsed.references) : null;
                 const inReplyTo = parsed.inReplyTo;
 
                 if (!texto || !destinatario) {
