@@ -86,6 +86,25 @@ function esIntermediario(email) {
   return intermediarios.some(pattern => emailLower.includes(pattern));
 }
 
+// Extraer email real del cliente desde el contenido (para correos de Shopify)
+function extraerEmailDelContenido(texto) {
+  // Buscar patrones específicos de Shopify
+  const patronShopify = /Correo\s+electr[óo]nico:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i;
+  const matchShopify = texto.match(patronShopify);
+  if (matchShopify) {
+    return matchShopify[1];
+  }
+  
+  // Patrón genérico: buscar "Email:" o "E-mail:" seguido de un email
+  const patronGenerico = /(?:Email|E-mail):\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i;
+  const matchGenerico = texto.match(patronGenerico);
+  if (matchGenerico) {
+    return matchGenerico[1];
+  }
+  
+  return null;
+}
+
 // Clasificar emails por dominio para filtrar spam/newsletters
 function clasificarPorDominio(email, asunto, texto) {
   const emailLower = email.toLowerCase();
@@ -215,15 +234,30 @@ function iniciarEmailListener() {
                   
                   // Buscar Reply-To o email real en el contenido
                   const replyTo = parsed.replyTo?.value?.[0]?.address;
+                  let emailReal = null;
+                  
                   if (replyTo && !esIntermediario(replyTo)) {
-                    logInfo(`✅ Encontrado Reply-To real: ${replyTo} - se usará ese destinatario`);
-                    // Aquí podrías reprocesar con el destinatario real si lo deseas
+                    emailReal = replyTo;
+                    logInfo(`✅ Encontrado Reply-To real: ${emailReal}`);
+                  } else {
+                    // Intentar extraer el email del contenido (caso Shopify)
+                    emailReal = extraerEmailDelContenido(texto);
+                    if (emailReal && !esIntermediario(emailReal)) {
+                      logInfo(`✅ Email extraído del contenido: ${emailReal}`);
+                    }
+                  }
+                  
+                  if (emailReal) {
+                    // Reemplazar destinatario con el email real y continuar el flujo normal
+                    logInfo(`📧 Redirigiendo respuesta al cliente real: ${emailReal}`);
+                    destinatario = emailReal;
+                    // NO hacer return, continuar el flujo para que se procese normalmente
                   } else {
                     logInfo(`⚠️ No se puede identificar destinatario real - se escala a humano`);
                     await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
                     registrarEmailEscalado('soporte'); // 📊 Métrica
+                    return;
                   }
-                  return;
                 }
 
                 // ============= VALIDACIÓN 2: CLASIFICACIÓN POR DOMINIO =============
