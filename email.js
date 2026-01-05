@@ -170,26 +170,60 @@ function iniciarEmailListener() {
     password: process.env.EMAIL_PASS,
     host: 'frezzyks-com.correoseguro.dinaserver.com',
     port: 993,
-    tls: true
+    tls: true,
+    keepalive: true,
+    connTimeout: 10000, // 10 segundos timeout
+    authTimeout: 5000,  // 5 segundos timeout en auth
+    tlsOptions: { rejectUnauthorized: false } // Para certificados self-signed
   });
 
   let lastSeqNumber = 0; // guarda el último número de secuencia procesado
+  let isConnected = false;
+  let reconnectAttempts = 0;
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const RECONNECT_DELAY = 5000; // 5 segundos entre intentos
+
+  function conectar() {
+    try {
+      console.log('[IMAP] Intentando conectar...');
+      imap.connect();
+    } catch (err) {
+      console.error('[IMAP] Error en connect():', err.message);
+      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        reconnectAttempts++;
+        console.log(`[IMAP] Reintentando conexión (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) en ${RECONNECT_DELAY}ms...`);
+        setTimeout(conectar, RECONNECT_DELAY);
+      }
+    }
+  }
 
   imap.once('ready', () => {
+    console.log('[IMAP] ✅ Conectado al servidor');
+    isConnected = true;
+    reconnectAttempts = 0;
+    
     imap.openBox('INBOX', false, (err, box) => {
-      if (err) throw err;
+      if (err) {
+        console.error('[IMAP] Error abriendo INBOX:', err.message);
+        imap.end();
+        return;
+      }
 
+      console.log(`[IMAP] INBOX abierta. Total mensajes: ${box.messages.total}`);
       lastSeqNumber = box.messages.total; // número total mensajes al iniciar
 
       imap.on('mail', (numNewMsgs) => {
+        console.log(`[IMAP] 📧 ${numNewMsgs} nuevo(s) email(s) detectado(s)`);
+        
         const fetchFrom = lastSeqNumber + 1;
         const fetchTo = lastSeqNumber + numNewMsgs;
 
         if (fetchFrom > fetchTo) {
-          // No hay mensajes nuevos
+          console.log('[IMAP] Sin mensajes nuevos para procesar');
           return;
         }
 
+        console.log(`[IMAP] Procesando emails ${fetchFrom}:${fetchTo}`);
         const fetchRange = `${fetchFrom}:${fetchTo}`;
         lastSeqNumber = fetchTo; // actualizamos para la próxima vez
 
@@ -388,21 +422,44 @@ function iniciarEmailListener() {
         });
 
         fetch.once('error', (err) => {
-          console.error('Error en fetch:', err);
+          console.error('[IMAP] Error en fetch:', err.message);
+          logError('IMAP_FETCH', err, 'Error al descargar emails');
         });
+
+        fetch.once('end', () => {
+          console.log('[IMAP] Fetch completado');
+        });
+      });
+
+      // Evento para cambios en el estado de la carpeta
+      imap.on('update', (seqno, info) => {
+        console.log(`[IMAP] Update en mensaje ${seqno}:`, info);
       });
     });
   });
 
   imap.once('error', (err) => {
-    console.error('Error con IMAP:', err);
+    console.error('[IMAP] ❌ Error de conexión:', err.message);
+    console.error('[IMAP] Detalles:', err);
+    isConnected = false;
+    logError('IMAP_CONNECTION', err, 'Error de conexión IMAP');
   });
 
   imap.once('end', () => {
-    console.log('Conexión IMAP finalizada.');
+    console.log('[IMAP] 🔌 Conexión cerrada');
+    isConnected = false;
+    // Intentar reconectar después de 10 segundos
+    console.log('[IMAP] Reintentando conexión en 10 segundos...');
+    setTimeout(conectar, 10000);
   });
 
-  imap.connect();
+  imap.on('close', () => {
+    console.log('[IMAP] Evento close disparado');
+    isConnected = false;
+  });
+
+  // Iniciar la conexión
+  conectar();
 }
 
 async function enviarCorreo(destinatario, texto, messageId, subjectOriginal) {
