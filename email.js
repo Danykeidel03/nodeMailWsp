@@ -508,6 +508,7 @@ ${textoOriginal}
     const { data, error } = await resend.emails.send({
       from: 'Soporte Frezzyks <contacto@frezzyks.com>',
       to: [destinatarioEquipo],
+      cc: ['contacto@frezzyks.com'], // Añadido en copia para que las respuestas lleguen a ambos
       subject: subject,
       text: cuerpoReenvio,
       reply_to: remitenteOriginal // Para que las respuestas vayan al cliente original
@@ -519,7 +520,7 @@ ${textoOriginal}
       throw error;
     }
 
-    console.log('Email reenviado correctamente a', destinatarioEquipo, '- Cliente original:', remitenteOriginal);
+    console.log('Email reenviado correctamente a', destinatarioEquipo, '(CC: contacto@frezzyks.com) - Cliente original:', remitenteOriginal);
   } catch (err) {
     console.error('Error en reenviarCorreo:', err);
     throw err;
