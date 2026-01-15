@@ -139,6 +139,86 @@ function clasificarPorDominio(email, asunto, texto) {
   return { tipo: 'PROCESAR', razon: 'Email normal de cliente' };
 }
 
+// Usar IA para detectar problemas críticos de entrega que requieren soporte humano
+async function detectarProblemaEntregaConIA(asunto, texto) {
+  try {
+    const { OpenAI } = require('openai');
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    const analisisPrompt = `Analiza el siguiente email y determina si el cliente está reportando un problema crítico de entrega:
+1. Paquete entregado en dirección incorrecta/diferente
+2. Paquete entregado en domicilio equivocado
+3. Problema de dirección que requiere intervención humana
+
+Email:
+Asunto: ${asunto}
+Texto: ${texto}
+
+Responde SOLO con una palabra:
+- "SOPORTE" si hay un problema crítico de entrega/dirección que requiere humano
+- "NORMAL" si es solo una consulta normal de estado o no hay problema de dirección
+
+NO añadas explicación, solo la palabra.`;
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: 'Eres un analizador de problemas de entrega. Responde con una sola palabra: SOPORTE o NORMAL.' },
+        { role: 'user', content: analisisPrompt }
+      ],
+      temperature: 0.3,
+      max_tokens: 10
+    });
+
+    const respuesta = completion.choices[0].message.content.trim().toUpperCase();
+    
+    return {
+      tieneProblemaEntrega: respuesta.includes('SOPORTE'),
+      razon: 'IA detectó problema crítico de entrega - requiere soporte'
+    };
+  } catch (error) {
+    console.error('Error en detectarProblemaEntregaConIA:', error);
+    logError('PROBLEMA_ENTREGA_DETECTOR', error, 'Error analizando problema de entrega con IA');
+    // En caso de error, no escalar (mejor errar siendo permisivo)
+    return { tieneProblemaEntrega: false, razon: 'Error en análisis' };
+  }
+}
+
+// Detectar problemas de entrega que requieren intervención humana urgente
+function detectarProblemaEntrega(asunto, texto) {
+  const asuntoLower = (asunto || '').toLowerCase();
+  const textoLower = (texto || '').toLowerCase();
+  
+  // Patrones de entrega en dirección incorrecta/diferente
+  const patronesProblemaEntrega = [
+    'entregado en otra dirección',
+    'entregado en dirección incorrecta',
+    'entregado en dirección diferente',
+    'dejado en otra dirección',
+    'dejado en dirección equivocada',
+    'paquete entregado en dirección equivocada',
+    'entregado en direccion erronea',
+    'entregado en casa equivocada',
+    'entregado en domicilio equivocado',
+    'lo entregaron en otra dirección',
+    'lo entregaron en dirección incorrecta',
+    'fue entregado en otra dirección',
+    'fue entregado en dirección erróne',
+    'entregado en lugar equivocado',
+    'entregado en sitio equivocado'
+  ];
+  
+  // Buscar en asunto y texto
+  const tieneProblemaEntrega = patronesProblemaEntrega.some(patron => 
+    asuntoLower.includes(patron) || textoLower.includes(patron)
+  );
+  
+  return {
+    tieneProblemaEntrega,
+    razon: 'Problema de entrega en dirección incorrecta - requiere soporte'
+  };
+}
+
 // Verificar si ya se respondió recientemente a este hilo
 function yaRespondidoRecientemente(threadId, minutos = 30) {
   const respuesta = respuestasRecientes.get(threadId);
@@ -307,6 +387,15 @@ function iniciarEmailListener() {
                   return;
                 } else if (clasificacionDominio.tipo === 'HUMANO') {
                   logInfo(`👤 ESCALADO: ${clasificacionDominio.razon} - De: ${destinatario}`);
+                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
+                  return;
+                }
+
+                // ============= VALIDACIÓN 2.5: PROBLEMA DE ENTREGA CON IA =============
+                // Usar IA para detectar si hay problema crítico de entrega (dirección incorrecta, etc)
+                const problemaEntrega = await detectarProblemaEntregaConIA(subjectOriginal, texto);
+                if (problemaEntrega.tieneProblemaEntrega) {
+                  logInfo(`🚨 PROBLEMA ENTREGA: ${problemaEntrega.razon} - Escalando a SOPORTE inmediatamente - De: ${destinatario}`);
                   await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
                   return;
                 }
