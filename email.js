@@ -247,6 +247,12 @@ function iniciarEmailListener() {
 
                 const texto = parsed.text;
                 destinatario = parsed.from?.value?.[0]?.address;
+                // 🚫 BLOQUEAR LOOP: No procesar si el remitente es contacto@frezzyks.com
+                if (destinatario && destinatario.toLowerCase() === 'contacto@frezzyks.com') {
+                  logInfo('🚫 BLOQUEADO: Email de contacto@frezzyks.com detectado, evitando loop de reenvío.');
+                  registrarEmailIgnorado('loop contacto@frezzyks.com');
+                  return;
+                }
                 const messageId = parsed.messageId;
                 const subjectOriginal = parsed.subject || 'Sin asunto';
                 const references = parsed.references ? (Array.isArray(parsed.references) ? parsed.references.join(' ') : parsed.references) : null;
