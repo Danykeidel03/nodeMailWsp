@@ -255,6 +255,10 @@ function iniciarEmailListener() {
                 }
                 const messageId = parsed.messageId;
                 const subjectOriginal = parsed.subject || 'Sin asunto';
+
+                // Log personalizado: Persona, Asunto, Mensaje recibido
+                logInfo(`Persona: ${destinatario} | Asunto: ${subjectOriginal}`);
+                logInfo(`Mensaje recibido:\n${texto}`);
                 const references = parsed.references ? (Array.isArray(parsed.references) ? parsed.references.join(' ') : parsed.references) : null;
                 const inReplyTo = parsed.inReplyTo;
 
@@ -263,14 +267,11 @@ function iniciarEmailListener() {
                   return;
                 }
 
-                // 📊 Métrica: Email recibido
-                registrarEmailRecibido();
 
                 // ============= VALIDACIÓN 1: INTERMEDIARIOS =============
                 // NUNCA responder a intermediarios (mailer@shopify.com, no-reply, etc.)
                 if (esIntermediario(destinatario)) {
                   logInfo(`🚫 BLOQUEADO: Email de intermediario ${destinatario} - NO SE RESPONDE`);
-                  registrarIntermediario(); // 📊 Métrica
                   
                   // Buscar Reply-To o email real en el contenido
                   const replyTo = parsed.replyTo?.value?.[0]?.address;
@@ -295,7 +296,6 @@ function iniciarEmailListener() {
                   } else {
                     logInfo(`⚠️ No se puede identificar destinatario real - se escala a humano`);
                     await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
-                    registrarEmailEscalado('soporte'); // 📊 Métrica
                     return;
                   }
                 }
@@ -304,12 +304,10 @@ function iniciarEmailListener() {
                 const clasificacionDominio = clasificarPorDominio(destinatario, subjectOriginal, texto);
                 if (clasificacionDominio.tipo === 'IGNORAR') {
                   logInfo(`🚫 IGNORADO: ${clasificacionDominio.razon} - De: ${destinatario}`);
-                  registrarEmailIgnorado(clasificacionDominio.razon); // 📊 Métrica
                   return;
                 } else if (clasificacionDominio.tipo === 'HUMANO') {
                   logInfo(`👤 ESCALADO: ${clasificacionDominio.razon} - De: ${destinatario}`);
                   await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
-                  registrarEmailEscalado('soporte'); // 📊 Métrica
                   return;
                 }
 
@@ -320,7 +318,6 @@ function iniciarEmailListener() {
                 // Verificar si ya se respondió recientemente
                 if (yaRespondidoRecientemente(claveHilo, 30)) {
                   logInfo(`🚫 DUPLICADO BLOQUEADO: Ya se respondió a este hilo en los últimos 30 minutos - De: ${destinatario}`);
-                  registrarDuplicado(); // 📊 Métrica
                   return;
                 }
                 
@@ -329,11 +326,10 @@ function iniciarEmailListener() {
                 // Agregar el mensaje del cliente al historial
                 agregarMensajeAHilo(claveHilo, 'cliente', texto);
 
-                logInfo(`Nuevo email de ${destinatario} - Asunto: ${subjectOriginal} - Hilo: ${historial.length} mensajes previos`);
 
                 // ============= CLASIFICACIÓN Y RESPUESTA =============
                 const respuesta = await clasificarYResponder(texto, destinatario, subjectOriginal, historial);
-                console.log('[DEBUG] Respuesta del clasificador:', respuesta);
+                logInfo(`Respuesta del bot: ${respuesta}`);
 
                 // ============= GUARD RAILS: ESTADOS INTERNOS =============
                 // NUNCA ENVIAR ESTADOS INTERNOS AL CLIENTE
@@ -342,21 +338,17 @@ function iniciarEmailListener() {
                 if (respuesta === 'SOPORTE') {
                   await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
                   logInfo(`📧 Email derivado a SOPORTE desde ${destinatario}`);
-                  registrarEmailEscalado('soporte'); // 📊 Métrica
                   return;
                 } else if (respuesta === 'SAMU') {
                   await reenviarCorreo('samu@frezzyks.com', destinatario, texto, subjectOriginal);
                   logInfo(`📧 Email derivado a SAMU desde ${destinatario}`);
-                  registrarEmailEscalado('samu'); // 📊 Métrica
                   return;
                 } else if (respuesta === 'NECESITA_PERSONA') {
                   await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
                   logInfo(`👤 Email requiere atención humana de ${destinatario}`);
-                  registrarEmailEscalado('soporte'); // 📊 Métrica
                   return;
                 } else if (respuesta === 'SIN_RESPUESTA') {
                   logInfo(`🔇 Sin respuesta necesaria para ${destinatario}`);
-                  registrarEmailIgnorado('sin respuesta necesaria'); // 📊 Métrica
                   return;
                 }
 
@@ -370,9 +362,7 @@ function iniciarEmailListener() {
                   // Verificar que no sea un estado interno
                   if (ESTADOS_INTERNOS.includes(respuesta.trim().toUpperCase())) {
                     logError(destinatario, new Error('Estado interno detectado en string'), `⚠️ CRÍTICO: Intentó enviar estado interno "${respuesta}" al cliente - BLOQUEADO`);
-                    registrarGuardrailActivado(); // 📊 Métrica
                     await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
-                    registrarEmailEscalado('soporte'); // 📊 Métrica
                     return;
                   }
                   mensajeAEnviar = respuesta;
@@ -389,24 +379,18 @@ function iniciarEmailListener() {
                   
                   if (contieneTacoInterno) {
                     logError(destinatario, new Error('Mensaje con estado interno detectado'), `⚠️ CRÍTICO: Mensaje contiene estados internos - BLOQUEADO - Mensaje: ${mensajeAEnviar}`);
-                    registrarGuardrailActivado(); // 📊 Métrica
                     await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
-                    registrarEmailEscalado('soporte'); // 📊 Métrica
                     return;
                   }
                   
                   // ✅ TODO BIEN - Enviar respuesta al cliente
                   agregarMensajeAHilo(claveHilo, 'bot', mensajeAEnviar);
-                  registrarRespuestaEnviada(claveHilo);
                   
                   await enviarCorreo(destinatario, mensajeAEnviar, messageId, subjectOriginal);
                   logRespuesta(destinatario, mensajeAEnviar, 'EMAIL');
                   logInfo(`✅ Email automático enviado a ${destinatario}`);
                   
                   // 📊 Métricas
-                  registrarEmailAutomatizado();
-                  const tiempoRespuesta = (Date.now() - tiempoInicio) / 1000;
-                  registrarTiempoRespuesta(tiempoRespuesta);
                 } else {
                   logInfo(`⚠️ Sin mensaje válido para enviar a ${destinatario}`);
                 }
@@ -414,7 +398,6 @@ function iniciarEmailListener() {
               } catch (err) {
                 console.error('Error parseando mensaje:', err);
                 logError(destinatario || 'Desconocido', err, 'Error procesando email');
-                registrarError(); // 📊 Métrica
               }
             });
           });
