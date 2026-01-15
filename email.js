@@ -574,18 +574,17 @@ async function reenviarCorreo(destinatarioEquipo, remitenteOriginal, textoOrigin
     // Asunto con formato de reenvío
     let subject = subjectOriginal.startsWith('Fwd:') ? subjectOriginal : `Fwd: ${subjectOriginal}`;
     
-    // Cuerpo con información del remitente original
-    const cuerpoReenvio = `
----------- Mensaje reenviado ----------
-De: ${remitenteOriginal}
-Asunto: ${subjectOriginal}
+    // Cuerpo amable para el cliente (sin detalles técnicos)
+    const cuerpoReenvio = `Hola,
 
-${textoOriginal}
-`;
+Tu consulta ha sido delegada a nuestro equipo de soporte especializado. Te contestaremos en breve.
+
+Un saludo!!, equipo Frezzyks 🍬`;
 
     const { data, error } = await resend.emails.send({
       from: 'Soporte Frezzyks <contacto@frezzyks.com>',
       to: [destinatarioEquipo],
+      cc: [remitenteOriginal], // Cliente también recibe copia
       subject: subject,
       text: cuerpoReenvio,
       reply_to: remitenteOriginal // Para que las respuestas vayan al cliente original
@@ -597,7 +596,7 @@ ${textoOriginal}
       throw error;
     }
 
-    console.log('Email reenviado a', destinatarioEquipo, '- Cliente:', remitenteOriginal);
+    console.log('Email reenviado a', destinatarioEquipo, 'con CC a', remitenteOriginal);
   } catch (err) {
     console.error('Error en reenviarCorreo:', err);
     throw err;
