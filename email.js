@@ -29,6 +29,11 @@ const hilosConversacion = new Map();
 // Valor: { timestamp, hash_contenido }
 const respuestasRecientes = new Map();
 
+// Registrar hilos escalados a soporte/SAMU para que el bot no responda
+// Clave: thread_id
+// Valor: { timestamp, destinatario ('soporte' | 'samu') }
+const hilosEscalados = new Map();
+
 // Limpiar hilos antiguos (más de 24 horas)
 setInterval(() => {
   const ahora = Date.now();
@@ -46,6 +51,19 @@ function obtenerClaveHilo(destinatario, references, inReplyTo, messageId) {
   // Usar references o in-reply-to para identificar el hilo
   const threadId = references || inReplyTo || messageId;
   return `${destinatario}:${threadId}`;
+}
+
+// Registrar que un hilo fue escalado a soporte/SAMU (bot no debe responder)
+function registrarHiloEscalado(claveHilo, destinatario) {
+  hilosEscalados.set(claveHilo, {
+    timestamp: Date.now(),
+    destinatario // 'soporte' o 'samu'
+  });
+}
+
+// Verificar si un hilo ya fue escalado a humano
+function hiloYaEscalado(claveHilo) {
+  return hilosEscalados.has(claveHilo);
 }
 
 function agregarMensajeAHilo(clave, rol, texto) {
@@ -387,6 +405,8 @@ function iniciarEmailListener() {
                   return;
                 } else if (clasificacionDominio.tipo === 'HUMANO') {
                   logInfo(`👤 ESCALADO: ${clasificacionDominio.razon} - De: ${destinatario}`);
+                  const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
+                  registrarHiloEscalado(claveHiloTemp, 'soporte');
                   await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
                   return;
                 }
@@ -396,6 +416,8 @@ function iniciarEmailListener() {
                 const problemaEntrega = await detectarProblemaEntregaConIA(subjectOriginal, texto);
                 if (problemaEntrega.tieneProblemaEntrega) {
                   logInfo(`🚨 PROBLEMA ENTREGA: ${problemaEntrega.razon} - Escalando a SOPORTE inmediatamente - De: ${destinatario}`);
+                  const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
+                  registrarHiloEscalado(claveHiloTemp, 'soporte');
                   await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
                   return;
                 }
@@ -403,6 +425,12 @@ function iniciarEmailListener() {
                 // ============= VALIDACIÓN 3: DUPLICADOS =============
                 // Identificar el hilo de conversación
                 const claveHilo = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
+                
+                // Verificar si este hilo ya fue escalado a soporte/SAMU (bot no debe responder)
+                if (hiloYaEscalado(claveHilo)) {
+                  logInfo(`🔇 HILO ESCALADO: Este email ya fue delegado a soporte/SAMU. No responder. - De: ${destinatario}`);
+                  return;
+                }
                 
                 // Verificar si ya se respondió recientemente
                 if (yaRespondidoRecientemente(claveHilo, 30)) {
@@ -425,14 +453,17 @@ function iniciarEmailListener() {
                 const ESTADOS_INTERNOS = ['SOPORTE', 'SAMU', 'NECESITA_PERSONA', 'SIN_RESPUESTA'];
                 
                 if (respuesta === 'SOPORTE') {
+                  registrarHiloEscalado(claveHilo, 'soporte');
                   await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
                   logInfo(`📧 Email derivado a SOPORTE desde ${destinatario}`);
                   return;
                 } else if (respuesta === 'SAMU') {
+                  registrarHiloEscalado(claveHilo, 'samu');
                   await reenviarCorreo('samu@frezzyks.com', destinatario, texto, subjectOriginal);
                   logInfo(`📧 Email derivado a SAMU desde ${destinatario}`);
                   return;
                 } else if (respuesta === 'NECESITA_PERSONA') {
+                  registrarHiloEscalado(claveHilo, 'soporte');
                   await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal);
                   logInfo(`👤 Email requiere atención humana de ${destinatario}`);
                   return;
@@ -574,8 +605,14 @@ async function reenviarCorreo(destinatarioEquipo, remitenteOriginal, textoOrigin
     // Asunto con formato de reenvío
     let subject = subjectOriginal.startsWith('Fwd:') ? subjectOriginal : `Fwd: ${subjectOriginal}`;
     
-    // Cuerpo amable para el cliente (sin detalles técnicos)
+    // Cuerpo amable para el cliente con su mensaje original
     const cuerpoReenvio = `Hola,
+
+Hemos recibido tu mensaje:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${textoOriginal}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Tu consulta ha sido delegada a nuestro equipo de soporte especializado. Te contestaremos en breve.
 
@@ -583,20 +620,20 @@ Un saludo!!, equipo Frezzyks 🍬`;
 
     const { data, error } = await resend.emails.send({
       from: 'Soporte Frezzyks <contacto@frezzyks.com>',
-      to: [destinatarioEquipo],
-      cc: [remitenteOriginal], // Cliente también recibe copia
+      to: [remitenteOriginal], // El cliente recibe el email
+      cc: [destinatarioEquipo], // Samu/soporte recibe copia
       subject: subject,
       text: cuerpoReenvio,
-      reply_to: remitenteOriginal // Para que las respuestas vayan al cliente original
+      reply_to: destinatarioEquipo // Las respuestas van al equipo que atiende
     });
 
     if (error) {
       console.error('Error reenviando email con Resend:', error);
-      logError(destinatarioEquipo, error, 'Error reenviando email');
+      logError(remitenteOriginal, error, 'Error reenviando email');
       throw error;
     }
 
-    console.log('Email reenviado a', destinatarioEquipo, 'con CC a', remitenteOriginal);
+    console.log('Email enviado a cliente', remitenteOriginal, 'con CC a equipo', destinatarioEquipo);
   } catch (err) {
     console.error('Error en reenviarCorreo:', err);
     throw err;
