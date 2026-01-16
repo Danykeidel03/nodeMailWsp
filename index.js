@@ -1,7 +1,7 @@
 // index.js
 require('dotenv').config();
 const express = require('express');
-const crypto = require('crypto');
+const crypto = require('node:crypto');
 const { iniciarWhatsapp } = require('./whatsapp');
 const { iniciarEmailListener, mostrarUltimoEmail } = require('./email');
 const { enviarMensajeWhatsapp } = require('./whatsapp');
@@ -10,6 +10,7 @@ const { logInfo } = require('./logger');
 const { obtenerMetricas, mostrarMetricas } = require('./metricas');
 
 const app = express();
+app.disable('x-powered-by');
 app.use(express.json());
 
 // Variable para almacenar el access token (en producción usa una base de datos)
@@ -23,14 +24,23 @@ app.get('/shopify/install', (req, res) => {
     return res.status(400).send('Missing shop parameter');
   }
 
+  // Validar formato de shop domain
+  if (!/^[a-zA-Z0-9\-]+\.myshopify\.com$/.test(shop)) {
+    return res.status(400).send('Invalid shop domain');
+  }
+
   const apiKey = process.env.SHOPIFY_API_KEY;
   const scopes = 'read_orders';
   const redirectUri = `${process.env.NGROK_URL}/shopify/callback`;
   const nonce = crypto.randomBytes(16).toString('hex');
 
-  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${apiKey}&scope=${scopes}&redirect_uri=${redirectUri}&state=${nonce}`;
+  const url = new URL(`https://${shop}/admin/oauth/authorize`);
+  url.searchParams.append('client_id', apiKey);
+  url.searchParams.append('scope', scopes);
+  url.searchParams.append('redirect_uri', redirectUri);
+  url.searchParams.append('state', nonce);
 
-  res.redirect(installUrl);
+  res.redirect(url.toString());
 });
 
 // Callback de OAuth
@@ -41,12 +51,18 @@ app.get('/shopify/callback', async (req, res) => {
     return res.status(400).send('Missing parameters');
   }
 
+  // Validar formato de shop domain
+  if (!/^[a-zA-Z0-9\-]+\.myshopify\.com$/.test(shop)) {
+    return res.status(400).send('Invalid shop domain');
+  }
+
   try {
     const apiKey = process.env.SHOPIFY_API_KEY;
     const apiSecret = process.env.SHOPIFY_API_SECRET;
 
     // Intercambiar el código por un access token
-    const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    const url = new URL(`https://${shop}/admin/oauth/access_token`);
+    const response = await fetch(url.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -81,10 +97,8 @@ app.post('/webhook', async (req, res) => {
   const mensaje = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
   if (mensaje) {
     const texto = mensaje.text?.body;
-    //const numero = mensaje.from;
     const respuesta = await clasificarYResponder(texto);
     if (respuesta) {
-      //await enviarMensajeWhatsapp(numero, respuesta);
     }
   }
   res.sendStatus(200);
@@ -257,13 +271,11 @@ app.listen(PORT, '0.0.0.0', () => {
   mostrarMetricas();
 
   // Inicia listeners de manera segura después del deploy
-  (async () => {
-    try {
-      await iniciarEmailListener();
-      console.log('Email listener iniciado correctamente');
-    } catch (err) {
-      console.error('Error iniciando Email Listener:', err);
-    }
-  })();
+  try {
+    iniciarEmailListener();
+    console.log('Email listener iniciado correctamente');
+  } catch (err) {
+    console.error('Error iniciando Email Listener:', err);
+  }
 });
 
