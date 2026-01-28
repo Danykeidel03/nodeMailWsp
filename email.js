@@ -311,17 +311,13 @@ function iniciarEmailListener() {
       lastSeqNumber = box.messages.total; // número total mensajes al iniciar
 
       imap.on('mail', (numNewMsgs) => {
-        console.log(`[IMAP] 📧 ${numNewMsgs} nuevo(s) email(s) detectado(s)`);
-        
         const fetchFrom = lastSeqNumber + 1;
         const fetchTo = lastSeqNumber + numNewMsgs;
 
         if (fetchFrom > fetchTo) {
-          console.log('[IMAP] Sin mensajes nuevos para procesar');
           return;
         }
 
-        console.log(`[IMAP] Procesando emails ${fetchFrom}:${fetchTo}`);
         const fetchRange = `${fetchFrom}:${fetchTo}`;
         lastSeqNumber = fetchTo; // actualizamos para la próxima vez
 
@@ -510,7 +506,11 @@ function iniciarEmailListener() {
                   
                   await enviarCorreo(destinatario, mensajeAEnviar, messageId, subjectOriginal);
                   logRespuesta(destinatario, mensajeAEnviar, 'EMAIL');
-                  logInfo(`✅ Email automático enviado a ${destinatario}`);
+                  
+                  // Resumen limpio
+                  const resumenMensaje = mensajeAEnviar.substring(0, 80).replace(/\n/g, ' ');
+                  console.log(`\n📧 Mail recibido: ${destinatario}`);
+                  console.log(`✅ Respuesta dada: ${resumenMensaje}...\n`);
                   
                   // 📊 Métricas
                 } else {
@@ -538,13 +538,13 @@ function iniciarEmailListener() {
         });
 
         fetch.once('end', () => {
-          console.log('[IMAP] Fetch completado');
+          // Procesos completados silenciosamente
         });
       });
 
       // Evento para cambios en el estado de la carpeta
       imap.on('update', (seqno, info) => {
-        console.log(`[IMAP] Update en mensaje ${seqno}:`, info);
+        // Cambios procesados silenciosamente
       });
     });
   });
@@ -595,7 +595,7 @@ async function enviarCorreo(destinatario, texto, messageId, subjectOriginal) {
       throw error;
     }
 
-    console.log('Email enviado correctamente:', data);
+    // Email enviado exitosamente
   } catch (err) {
     console.error('Error en enviarCorreo:', err);
     throw err;

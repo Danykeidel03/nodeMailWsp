@@ -36,7 +36,6 @@ function logRespuesta(destinatario, mensaje, tipo = 'EMAIL') {
   const logEntry = `[${fechaHora}] [${tipo}] DESTINATARIO: ${destinatario}\nMENSAJE: ${mensajeTruncado}...\n${'='.repeat(80)}\n`;
   
   fs.appendFileSync(LOG_FILE, logEntry, 'utf8');
-  console.log(`[LOG] Respuesta registrada para ${destinatario}`);
 
   agregarLogPendiente(`Respuesta enviada (${tipo})\n${logEntry}`);
 }

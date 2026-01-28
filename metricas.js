@@ -190,15 +190,15 @@ function guardarMetricasEnArchivo() {
   }
 }
 
-// Mostrar métricas cada 30 minutos
-setInterval(() => {
-  mostrarMetricas();
-}, 30 * 60 * 1000); // 30 minutos
+// Mostrar métricas cada 30 minutos (DESACTIVADO)
+// setInterval(() => {
+//   mostrarMetricas();
+// }, 30 * 60 * 1000); // 30 minutos
 
-// Guardar métricas cada hora
-setInterval(() => {
-  guardarMetricasEnArchivo();
-}, 60 * 60 * 1000); // 1 hora
+// Guardar métricas cada hora (DESACTIVADO)
+// setInterval(() => {
+//   guardarMetricasEnArchivo();
+// }, 60 * 60 * 1000); // 1 hora
 
 module.exports = {
   registrarEmailRecibido,
