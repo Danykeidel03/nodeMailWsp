@@ -71,11 +71,42 @@ async function obtenerEstadoSeguimiento(numeroSeguimiento) {
   }
 }
 
-async function clasificarYResponder(mensaje, destinatario, asunto, historialConversacion = []) {
+async function clasificarYResponder(mensaje, destinatario, asunto, historialConversacion = [], infoAdjuntos = null) {
   let infoPedido = '';
   let infoSeguimiento = '';
+  let infoArchivosAdjuntos = '';
   let estadoCompletoDisponible = false;
   
+  // Procesar información de adjuntos si existe
+  if (infoAdjuntos && infoAdjuntos.tieneAdjuntos) {
+    infoArchivosAdjuntos = infoAdjuntos.resumen;
+  }
+  
+  // ============= DETECCIÓN DE FRUSTRACIÓN / REPETICIÓN =============
+  const mensajeLower = mensaje.toLowerCase();
+  const patronesFrustracion = [
+    'ya me dijiste', 'ya me has dicho', 'eso ya lo sé', 'eso ya lo se',
+    'no me sirve', 'no me vale', 'no entiendes', 'no me entiendes',
+    'otra vez lo mismo', 'siempre lo mismo', 'me repites lo mismo',
+    'sigo sin', 'sigo igual', 'no me soluciona', 'no se soluciona',
+    'estoy harto', 'estoy harta', 'me estáis tomando el pelo',
+    'vaya broma', 'qué desastre', 'vergüenza', 'indignado', 'indignada',
+    'quiero hablar con alguien', 'quiero hablar con una persona',
+    'pasadme con', 'ponme con', 'un humano', 'persona real',
+    'esto es increíble', 'no puede ser', 'inadmisible'
+  ];
+  
+  const clienteFrustrado = patronesFrustracion.some(patron => mensajeLower.includes(patron));
+  
+  // Detectar si el bot ya respondió múltiples veces sobre el mismo tema
+  const respuestasDelBot = historialConversacion.filter(m => m.rol === 'bot').length;
+  const bucleDetectado = respuestasDelBot >= 2 && historialConversacion.length >= 4;
+  
+  if (clienteFrustrado || bucleDetectado) {
+    console.log(`[DEBUG] ${clienteFrustrado ? 'Cliente frustrado detectado' : 'Bucle de conversación detectado'} - Escalando a SOPORTE`);
+    return 'SOPORTE';
+  }
+
   // Extraer número de pedido
   const regexPedido = /#(\d{4,})|(?:número de )?pedido[:\s#]+(\d{4,})/i;
   const textoCompleto = `${mensaje} ${asunto || ''}`;
@@ -177,15 +208,28 @@ Eres el asistente virtual de atención al cliente de *Frezzyks*, una tienda onli
 •⁠  ⁠Usas emojis solo al final de frases (máximo 2), y solo si el contexto lo permite.
 •⁠  ⁠Cierras siempre con: "Un saludo!!, equipo Frezzyks 🍬" (salvo en WhatsApp, donde puede ser más corto).
 
-${contextoConversacion}IMPORTANTE SOBRE EL HISTORIAL:
-- Si ya respondiste una pregunta anteriormente en este hilo, NO REPITAS la información completa de nuevo.
-- Si el cliente te da las gracias, simplemente responde amablemente (ej: "De nada! Para lo que necesites aquí estamos 😊") SIN repetir toda la información anterior.
-- Si el cliente hace una pregunta de seguimiento relacionada, responde solo esa nueva pregunta específica.
-- Si el cliente pregunta algo totalmente nuevo, entonces sí puedes dar información completa.
-- Mantén las respuestas de seguimiento cortas y naturales, como en una conversación real.
+${contextoConversacion}🚨 REGLAS CRÍTICAS ANTI-REPETICIÓN (MUY IMPORTANTE):
+
+1. **NUNCA repitas una respuesta que ya diste** - Si ya explicaste algo en el historial, NO lo vuelvas a explicar con las mismas palabras.
+
+2. **Si el cliente repite su problema o insiste:**
+   - Reconoce que entiendes su frustración
+   - NO repitas la misma información
+   - Ofrece una ALTERNATIVA o ESCALADO: "Entiendo que esto es frustrante. Voy a pasar tu caso a un compañero para que te ayude personalmente"
+   - Si no puedes ofrecer nada nuevo, responde SOPORTE para escalar a humano
+
+3. **Si el cliente parece frustrado o insatisfecho con tu respuesta anterior:**
+   - Frases como "ya me dijiste eso", "no me sirve", "eso ya lo sé", "no entiendes", "pero es que...", "sigo sin...", "otra vez lo mismo"
+   - En estos casos, responde únicamente: SOPORTE (para que un humano tome el control)
+
+4. **Si el cliente da las gracias:** respuesta CORTA ("¡De nada! Aquí estamos 😊")
+
+5. **Si el cliente hace una pregunta de seguimiento:** responde SOLO eso, sin repetir contexto.
+
+6. **Detecta bucles:** Si ves que en el historial ya respondiste 2+ veces sobre el mismo tema y el cliente sigue preguntando lo mismo, responde: SOPORTE
 
 ---
-${infoPedido ? 'INFO PEDIDO PARA EL CLIENTE:\n' + infoPedido + '\n' : ''}${infoSeguimiento ? infoSeguimiento + '\n' : ''}---
+${infoArchivosAdjuntos ? infoArchivosAdjuntos + '\n\n' : ''}${infoPedido ? 'INFO PEDIDO PARA EL CLIENTE:\n' + infoPedido + '\n' : ''}${infoSeguimiento ? infoSeguimiento + '\n' : ''}---
 A continuación, se describen los temas más frecuentes que puedes resolver tú:
 
 NO inventes respuestas. Si no puedes ayudar, responde únicamente con la palabra NECESITA_PERSONA.

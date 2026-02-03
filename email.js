@@ -123,6 +123,81 @@ function extraerEmailDelContenido(texto) {
   return null;
 }
 
+// Analizar adjuntos del email para informar a la IA
+function analizarAdjuntos(parsed) {
+  const adjuntos = parsed.attachments || [];
+  const tieneAdjuntos = adjuntos.length > 0;
+  
+  if (!tieneAdjuntos) {
+    return { tieneAdjuntos: false, resumen: null };
+  }
+  
+  const imagenes = [];
+  const documentos = [];
+  const videos = [];
+  const otros = [];
+  
+  adjuntos.forEach(adj => {
+    const tipo = adj.contentType || '';
+    const nombre = adj.filename || 'sin nombre';
+    const tamanio = adj.size ? `${Math.round(adj.size / 1024)}KB` : 'desconocido';
+    
+    const info = { nombre, tamanio, tipo };
+    
+    if (tipo.startsWith('image/')) {
+      imagenes.push(info);
+    } else if (tipo.includes('pdf') || tipo.includes('document') || tipo.includes('word') || tipo.includes('excel') || tipo.includes('spreadsheet')) {
+      documentos.push(info);
+    } else if (tipo.startsWith('video/')) {
+      videos.push(info);
+    } else {
+      otros.push(info);
+    }
+  });
+  
+  // También detectar imágenes inline (pegadas en el cuerpo)
+  const imagenesInline = parsed.html ? 
+    (parsed.html.match(/<img[^>]+src=["']cid:/gi) || []).length : 0;
+  
+  let resumen = '📎 ADJUNTOS EN ESTE EMAIL:\n';
+  
+  if (imagenes.length > 0 || imagenesInline > 0) {
+    const totalImagenes = imagenes.length + imagenesInline;
+    resumen += `- ${totalImagenes} imagen(es) adjunta(s)`;
+    if (imagenes.length > 0) {
+      resumen += `: ${imagenes.map(i => i.nombre).join(', ')}`;
+    }
+    if (imagenesInline > 0) {
+      resumen += ` (${imagenesInline} pegada(s) en el email)`;
+    }
+    resumen += '\n';
+  }
+  
+  if (documentos.length > 0) {
+    resumen += `- ${documentos.length} documento(s): ${documentos.map(d => d.nombre).join(', ')}\n`;
+  }
+  
+  if (videos.length > 0) {
+    resumen += `- ${videos.length} video(s): ${videos.map(v => v.nombre).join(', ')}\n`;
+  }
+  
+  if (otros.length > 0) {
+    resumen += `- ${otros.length} archivo(s) adicional(es): ${otros.map(o => o.nombre).join(', ')}\n`;
+  }
+  
+  resumen += '\n⚠️ IMPORTANTE: El cliente YA HA ENVIADO estos archivos. NO le pidas que envíe fotos o documentos si ya lo ha hecho. Agradece que los haya adjuntado y procesa su solicitud.';
+  
+  return {
+    tieneAdjuntos: true,
+    totalAdjuntos: adjuntos.length + imagenesInline,
+    imagenes: imagenes.length + imagenesInline,
+    documentos: documentos.length,
+    videos: videos.length,
+    otros: otros.length,
+    resumen
+  };
+}
+
 // Clasificar emails por dominio para filtrar spam/newsletters
 function clasificarPorDominio(email, asunto, texto) {
   const emailLower = email.toLowerCase();
@@ -441,9 +516,14 @@ function iniciarEmailListener() {
                 // Agregar el mensaje del cliente al historial
                 agregarMensajeAHilo(claveHilo, 'cliente', texto);
 
+                // ============= ANÁLISIS DE ADJUNTOS =============
+                const infoAdjuntos = analizarAdjuntos(parsed);
+                if (infoAdjuntos.tieneAdjuntos) {
+                  logInfo(`📎 Email con ${infoAdjuntos.totalAdjuntos} adjunto(s): ${infoAdjuntos.imagenes} imagen(es), ${infoAdjuntos.documentos} documento(s)`);
+                }
 
                 // ============= CLASIFICACIÓN Y RESPUESTA =============
-                const respuesta = await clasificarYResponder(texto, destinatario, subjectOriginal, historial);
+                const respuesta = await clasificarYResponder(texto, destinatario, subjectOriginal, historial, infoAdjuntos);
                 logInfo(`Respuesta del bot: ${respuesta}`);
 
                 // ============= GUARD RAILS: ESTADOS INTERNOS =============
