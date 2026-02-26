@@ -229,6 +229,48 @@ function clasificarPorDominio(email, asunto, texto) {
     return { tipo: 'IGNORAR', razon: 'Notificación interna - no requiere respuesta' };
   }
   
+  // ============= DETECCIÓN DE SPAM / VENTAS NO SOLICITADAS =============
+  // Patrones de spam comercial (gente ofreciendo servicios)
+  const patronesSpamVentas = [
+    // Ofertas de servicios de marketing/ventas
+    'i\'d like to help you', 'i would like to help you',
+    'drive.*sales', 'driving.*sales', 'new sales',
+    'handle the marketing', 'marketing services', 'marketing agency',
+    'no upfront cost', 'risk-free', 'risk free',
+    'only take.*%', 'commission based', 'performance based',
+    'prove value first', 'long-term partnership', 'long term partnership',
+    'would you be interested', 'are you interested',
+    'before i share full details', 'let me know if',
+    'i can help you', 'we can help you',
+    'grow your business', 'scale your business',
+    'increase your revenue', 'boost your sales',
+    // SEO / Link building spam
+    'seo services', 'link building', 'backlinks',
+    'guest post', 'sponsored post',
+    // Ofertas genéricas de servicios
+    'our agency', 'my agency', 'our team can',
+    'free consultation', 'free audit',
+    'i noticed your', 'i came across your',
+    // Cold outreach típico
+    'how are you doing today', 'hope this email finds you',
+    'quick question', 'reaching out because'
+  ];
+  
+  const esSpamVentas = patronesSpamVentas.some(patron => 
+    textoLower.includes(patron) || asuntoLower.includes(patron)
+  );
+  
+  // Verificar también si menciona porcentajes de comisión (típico de spam de ventas)
+  const mencionaComision = /\d+%.*(?:sales|revenue|commission|comisión)/i.test(texto);
+  
+  // Asuntos genéricos típicos de spam
+  const asuntosSpam = ['hello', 'hi there', 'quick question', 'partnership', 'opportunity', 'proposal'];
+  const asuntoEsSpam = asuntosSpam.some(s => asuntoLower === s || asuntoLower === 're: ' + s);
+  
+  if (esSpamVentas || mencionaComision || (asuntoEsSpam && textoLower.length > 500)) {
+    return { tipo: 'IGNORAR', razon: 'Spam comercial / Oferta de servicios no solicitada' };
+  }
+  
   return { tipo: 'PROCESAR', razon: 'Email normal de cliente' };
 }
 

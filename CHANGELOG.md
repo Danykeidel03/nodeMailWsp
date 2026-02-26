@@ -4,6 +4,36 @@ Todas las versiones y cambios notables del bot de atención al cliente.
 
 ---
 
+## [1.1.0] - 2026-02-25
+
+### ✨ Nuevas funcionalidades
+
+#### 📧 Descuento de Newsletter
+- El bot ahora sabe responder sobre el descuento por suscribirse a la newsletter
+- Indica que el código llega por email automáticamente
+- Sugiere revisar la carpeta de SPAM
+- Si no lo encuentran, pide el email para reenviar el código
+
+#### 👤 Pedido no aparece en la cuenta
+- Cuando el cliente dice que no ve su pedido en su cuenta:
+  - El bot pide SIEMPRE email + nombre completo desde el principio
+  - Explica que puede ser porque usó otro email o compró como invitado
+  - Con los datos puede buscar el pedido en el sistema
+
+#### 🛡️ Filtro anti-spam mejorado
+- Detecta y filtra automáticamente emails de spam comercial como:
+  - Ofertas de servicios de marketing/ventas ("I'd like to help you drive sales...")
+  - Propuestas de colaboración no solicitadas con comisiones
+  - SEO/Link building spam
+  - Cold outreach genérico
+- Ya no llegan estos emails a soporte, se ignoran directamente
+
+### 📁 Archivos modificados
+- `email.js` - Nueva detección de spam en `clasificarPorDominio()`
+- `classifier.js` - Nuevas secciones de FAQ: Newsletter y Pedido no aparece
+
+---
+
 ## [1.0.0] - 2026-02-03
 
 ### ✨ Nuevas funcionalidades
