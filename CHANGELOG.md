@@ -4,6 +4,33 @@ Todas las versiones y cambios notables del bot de atención al cliente.
 
 ---
 
+## [1.1.1] - 2026-03-05
+
+### ✨ Nuevas funcionalidades
+
+#### 🎟️ Descuento newsletter NO caduca
+- Añadido que el código de descuento de la newsletter **no tiene fecha de caducidad**
+- El cliente puede usarlo cuando quiera
+
+#### 🔍 Preguntar número de pedido antes de escalar
+- Cuando el cliente pregunta cómo localizar su pedido o dónde está:
+  - El bot PRIMERO pide el número de pedido (#12345)
+  - Solo si no lo proporcionan después de pedirlo, escala a soporte
+  - Si lo dan, consulta el estado y responde directamente
+
+#### 📜 Historial completo al escalar a soporte
+- **CORREGIDO**: Cuando el bot deriva a soporte, ahora incluye TODO el historial:
+  - Primer mensaje del cliente ✅
+  - Primera respuesta del bot ✅
+  - Todos los mensajes siguientes ✅
+- El equipo de soporte ahora ve la conversación completa desde el principio
+
+### 📁 Archivos modificados
+- `classifier.js` - Nuevas instrucciones: descuento no caduca + pedir nº pedido
+- `email.js` - Corregido orden de historial + usar `historialCompleto` al escalar
+
+---
+
 ## [1.1.0] - 2026-02-25
 
 ### ✨ Nuevas funcionalidades

@@ -553,10 +553,11 @@ function iniciarEmailListener() {
                   return;
                 }
                 
-                const historial = obtenerHistorialHilo(claveHilo);
-                
-                // Agregar el mensaje del cliente al historial
+                // Agregar el mensaje del cliente al historial ANTES de obtenerlo
                 agregarMensajeAHilo(claveHilo, 'cliente', texto);
+                
+                // Obtener historial DESPUÉS de agregar el mensaje actual (así incluye todo)
+                const historial = obtenerHistorialHilo(claveHilo);
 
                 // ============= ANÁLISIS DE ADJUNTOS =============
                 const infoAdjuntos = analizarAdjuntos(parsed);
@@ -574,17 +575,21 @@ function iniciarEmailListener() {
                 
                 if (respuesta === 'SOPORTE') {
                   registrarHiloEscalado(claveHilo, 'soporte');
-                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historial);
+                  // Obtener historial actualizado para incluir TODOS los mensajes
+                  const historialCompleto = obtenerHistorialHilo(claveHilo);
+                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
                   logInfo(`📧 Email derivado a SOPORTE desde ${destinatario}`);
                   return;
                 } else if (respuesta === 'SAMU') {
                   registrarHiloEscalado(claveHilo, 'samu');
-                  await reenviarCorreo('samu@frezzyks.com', destinatario, texto, subjectOriginal, historial);
+                  const historialCompleto = obtenerHistorialHilo(claveHilo);
+                  await reenviarCorreo('samu@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
                   logInfo(`📧 Email derivado a SAMU desde ${destinatario}`);
                   return;
                 } else if (respuesta === 'NECESITA_PERSONA') {
                   registrarHiloEscalado(claveHilo, 'soporte');
-                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historial);
+                  const historialCompleto = obtenerHistorialHilo(claveHilo);
+                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
                   logInfo(`👤 Email requiere atención humana de ${destinatario}`);
                   return;
                 } else if (respuesta === 'SIN_RESPUESTA') {
@@ -602,7 +607,8 @@ function iniciarEmailListener() {
                   // Verificar que no sea un estado interno
                   if (ESTADOS_INTERNOS.includes(respuesta.trim().toUpperCase())) {
                     logError(destinatario, new Error('Estado interno detectado en string'), `⚠️ CRÍTICO: Intentó enviar estado interno "${respuesta}" al cliente - BLOQUEADO`);
-                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historial);
+                    const historialCompleto = obtenerHistorialHilo(claveHilo);
+                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
                     return;
                   }
                   mensajeAEnviar = respuesta;
@@ -619,7 +625,8 @@ function iniciarEmailListener() {
                   
                   if (contieneTacoInterno) {
                     logError(destinatario, new Error('Mensaje con estado interno detectado'), `⚠️ CRÍTICO: Mensaje contiene estados internos - BLOQUEADO - Mensaje: ${mensajeAEnviar}`);
-                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historial);
+                    const historialCompleto = obtenerHistorialHilo(claveHilo);
+                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
                     return;
                   }
                   
