@@ -458,10 +458,11 @@ function iniciarEmailListener() {
 
                 const texto = parsed.text;
                 destinatario = parsed.from?.value?.[0]?.address;
-                // 🚫 BLOQUEAR LOOP: No procesar si el remitente es contacto@frezzyks.com
-                if (destinatario && destinatario.toLowerCase() === 'contacto@frezzyks.com') {
-                  logInfo('🚫 BLOQUEADO: Email de contacto@frezzyks.com detectado, evitando loop de reenvío.');
-                  registrarEmailIgnorado('loop contacto@frezzyks.com');
+                // 🚫 BLOQUEAR LOOP: No procesar emails internos de Frezzyks
+                const emailsInternosFrezzyks = ['contacto@frezzyks.com', 'soporte@frezzyks.com', 'samu@frezzyks.com'];
+                if (destinatario && emailsInternosFrezzyks.includes(destinatario.toLowerCase())) {
+                  logInfo(`🚫 BLOQUEADO: Email interno de ${destinatario} - evitando loop`);
+                  registrarEmailIgnorado(`loop ${destinatario}`);
                   return;
                 }
                 const messageId = parsed.messageId;
@@ -733,12 +734,12 @@ async function enviarCorreo(destinatario, texto, messageId, subjectOriginal) {
 
 async function reenviarCorreo(destinatarioEquipo, remitenteOriginal, textoOriginal, subjectOriginal, historialConversacion = []) {
   try {
-    // Asunto con formato de reenvío
-    let subject = subjectOriginal.startsWith('Fwd:') ? subjectOriginal : `Fwd: ${subjectOriginal}`;
+    // Asunto con formato de reenvío + email del cliente para fácil identificación
+    let subject = `[${remitenteOriginal}] ${subjectOriginal}`;
     
     // Determinar el tipo de equipo para personalizar el mensaje
     const esEquipoSamu = destinatarioEquipo.toLowerCase().includes('samu');
-    const nombreEquipo = esEquipoSamu ? 'equipo especializado' : 'equipo de soporte';
+    const nombreEquipo = esEquipoSamu ? 'SAMU (Dirección)' : 'Soporte';
     
     // Construir el historial completo para texto plano
     let historialTexto = '';
@@ -752,20 +753,26 @@ async function reenviarCorreo(destinatarioEquipo, remitenteOriginal, textoOrigin
       historialTexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
     }
     
-    // Cuerpo amable en texto plano (fallback)
-    const cuerpoTextoPlano = `Hola,
-
-Hemos recibido tu mensaje:
+    // Cuerpo INTERNO para el equipo (NO se envía al cliente)
+    const cuerpoTextoPlano = `📬 CASO ESCALADO A ${nombreEquipo.toUpperCase()}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📧 Cliente: ${remitenteOriginal}
+📋 Asunto original: ${subjectOriginal}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📝 ÚLTIMO MENSAJE DEL CLIENTE:
 ${textoOriginal}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${historialTexto}
-Tu consulta ha sido delegada a nuestro ${nombreEquipo}. Te contestaremos en breve.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 INSTRUCCIONES:
+• El cliente NO ha sido notificado de este escalado
+• Para responder: Simplemente responde a este email (Reply)
+• Tu respuesta llegará DIRECTAMENTE al cliente (${remitenteOriginal})
+• El bot NO intervendrá en tu respuesta
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
-Un saludo!!, equipo Frezzyks 🍬`;
-
-    // Construir el historial HTML
+    // Construir el historial HTML para el email interno
     let historialHTML = '';
     if (historialConversacion && historialConversacion.length > 0) {
       historialHTML = '<div class="history-section"><div class="history-title">📜 Historial de conversación:</div>';
@@ -777,205 +784,82 @@ Un saludo!!, equipo Frezzyks 🍬`;
         const colorFondo = esCliente ? '#E3F2FD' : '#FFF3E0';
         
         historialHTML += `
-          <div class="history-item" style="border-left-color: ${colorBorde}; background: ${colorFondo};">
-            <div class="history-header">
+          <div class="history-item" style="border-left: 4px solid ${colorBorde}; background: ${colorFondo}; padding: 15px; margin-bottom: 12px; border-radius: 4px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #eee;">
               <strong>${emisor}</strong>
-              <span class="history-date">${fecha}</span>
+              <span style="font-size: 12px; color: #999;">${fecha}</span>
             </div>
-            <div class="history-content">${msg.texto.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+            <div style="white-space: pre-wrap;">${msg.texto.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
           </div>
         `;
       });
       historialHTML += '</div>';
     }
 
-    // Cuerpo HTML bonito y profesional
+    // Cuerpo HTML INTERNO para el equipo
     const cuerpoHTML = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
-          }
-          .container {
-            background: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-          }
-          .header {
-            text-align: center;
-            padding-bottom: 20px;
-            border-bottom: 3px solid #4CAF50;
-            margin-bottom: 25px;
-          }
-          .header h1 {
-            margin: 0;
-            color: #4CAF50;
-            font-size: 24px;
-          }
-          .greeting {
-            font-size: 16px;
-            margin-bottom: 20px;
-            color: #555;
-          }
-          .message-box {
-            background: #f9f9f9;
-            border-left: 4px solid #4CAF50;
-            padding: 20px;
-            margin: 20px 0;
-            border-radius: 4px;
-          }
-          .message-label {
-            font-weight: 600;
-            color: #4CAF50;
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 10px;
-          }
-          .message-content {
-            color: #333;
-            font-size: 15px;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-          }
-          .info-box {
-            background: #E3F2FD;
-            border-left: 4px solid #2196F3;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 4px;
-          }
-          .info-box p {
-            margin: 0;
-            color: #1976D2;
-            font-size: 14px;
-          }
-          .footer {
-            text-align: center;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-            color: #999;
-            font-size: 14px;
-          }
-          .signature {
-            margin-top: 25px;
-            font-weight: 500;
-            color: #555;
-          }
-          .badge {
-            display: inline-block;
-            padding: 4px 12px;
-            background: #4CAF50;
-            color: white;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-left: 10px;
-          }
-          .history-section {
-            margin: 30px 0;
-            padding: 20px;
-            background: #fafafa;
-            border-radius: 8px;
-            border: 1px solid #e0e0e0;
-          }
-          .history-title {
-            font-weight: 600;
-            color: #666;
-            font-size: 16px;
-            margin-bottom: 15px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-          }
-          .history-item {
-            background: white;
-            padding: 15px;
-            margin-bottom: 12px;
-            border-left: 4px solid;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-          }
-          .history-item:last-child {
-            margin-bottom: 0;
-          }
-          .history-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #eee;
-          }
-          .history-date {
-            font-size: 12px;
-            color: #999;
-          }
-          .history-content {
-            color: #333;
-            font-size: 14px;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            line-height: 1.5;
-          }
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 700px; margin: 0 auto; padding: 20px; }
+          .container { background: white; padding: 25px; border-radius: 12px; border: 1px solid #e0e0e0; }
+          .header { background: ${esEquipoSamu ? '#9C27B0' : '#4CAF50'}; color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; }
+          .header h2 { margin: 0; }
+          .info-row { background: #f5f5f5; padding: 12px 15px; border-radius: 6px; margin-bottom: 10px; }
+          .info-label { font-weight: 600; color: #666; }
+          .message-box { background: #fff3e0; border-left: 4px solid #FF9800; padding: 20px; margin: 20px 0; border-radius: 4px; }
+          .instructions { background: #E8F5E9; border: 1px solid #4CAF50; padding: 15px; border-radius: 8px; margin-top: 20px; }
+          .instructions h4 { margin: 0 0 10px 0; color: #2E7D32; }
+          .instructions ul { margin: 0; padding-left: 20px; }
+          .instructions li { margin: 5px 0; }
+          .client-email { background: #2196F3; color: white; padding: 3px 10px; border-radius: 4px; font-weight: 600; }
         </style>
       </head>
       <body>
         <div class="container">
           <div class="header">
-            <h1>🍬 Frezzyks <span class="badge">Mensaje recibido</span></h1>
+            <h2>📬 Caso escalado a ${nombreEquipo}</h2>
           </div>
           
-          <div class="greeting">
-            <strong>Hola,</strong>
-            <p>Hemos recibido tu mensaje correctamente y queremos que sepas que nos ocupamos de él:</p>
+          <div class="info-row">
+            <span class="info-label">📧 Cliente:</span> <span class="client-email">${remitenteOriginal}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">📋 Asunto:</span> ${subjectOriginal}
           </div>
           
           <div class="message-box">
-            <div class="message-label">📨 Tu último mensaje:</div>
-            <div class="message-content">${textoOriginal.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+            <div style="font-weight: 600; color: #E65100; margin-bottom: 10px;">📝 Último mensaje del cliente:</div>
+            <div style="white-space: pre-wrap;">${textoOriginal.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
           </div>
           
           ${historialHTML}
           
-          <div class="info-box">
-            <p><strong>✅ Estado:</strong> Tu consulta ha sido delegada a nuestro ${nombreEquipo} para darte la mejor atención posible.</p>
-            <p style="margin-top: 8px;"><strong>⏱️ Tiempo de respuesta:</strong> Te contestaremos en breve.</p>
-          </div>
-          
-          <div class="signature">
-            Un saludo!!,<br>
-            <strong>Equipo Frezzyks 🍬</strong>
-          </div>
-          
-          <div class="footer">
-            Este mensaje ha sido generado automáticamente.<br>
-            Por favor, no respondas a este email. El equipo te contactará directamente.
+          <div class="instructions">
+            <h4>💡 Instrucciones</h4>
+            <ul>
+              <li><strong>El cliente NO ha sido notificado</strong> de este escalado</li>
+              <li>Para responder: <strong>Simplemente haz "Responder" a este email</strong></li>
+              <li>Tu respuesta llegará <strong>directamente al cliente</strong></li>
+              <li>El bot <strong>NO intervendrá</strong> en tu respuesta</li>
+            </ul>
           </div>
         </div>
       </body>
       </html>
     `;
 
+    // ENVIAR SOLO AL EQUIPO INTERNO - NO al cliente
+    // Reply-To apunta al cliente para que la respuesta le llegue directamente
     const { data, error } = await resend.emails.send({
-      from: 'Soporte Frezzyks <contacto@frezzyks.com>',
-      to: [remitenteOriginal], // El cliente recibe el email
-      cc: [destinatarioEquipo], // Samu/soporte recibe copia
+      from: 'Bot Frezzyks <contacto@frezzyks.com>',
+      to: [destinatarioEquipo], // SOLO al equipo interno
       subject: subject,
       text: cuerpoTextoPlano,
       html: cuerpoHTML,
-      reply_to: destinatarioEquipo // Las respuestas van al equipo que atiende
+      reply_to: remitenteOriginal // Las respuestas van DIRECTAMENTE al cliente
     });
 
     if (error) {
@@ -984,7 +868,7 @@ Un saludo!!, equipo Frezzyks 🍬`;
       throw error;
     }
 
-    console.log('Email enviado a cliente', remitenteOriginal, 'con CC a equipo', destinatarioEquipo);
+    console.log(`📧 Caso escalado a ${nombreEquipo} (${destinatarioEquipo}) - Cliente: ${remitenteOriginal} - Reply-To configurado al cliente`);
   } catch (err) {
     console.error('Error en reenviarCorreo:', err);
     throw err;

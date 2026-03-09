@@ -4,6 +4,30 @@ Todas las versiones y cambios notables del bot de atención al cliente.
 
 ---
 
+## [1.1.2] - 2026-03-09
+
+### ✨ Nuevas funcionalidades
+
+#### 🔇 Escalado silencioso a superiores
+- Al escalar a soporte/SAMU, **ya NO se notifica al cliente**
+- El cliente no sabe que su caso ha sido derivado (evita ansiedad)
+- El equipo puede decidir cuándo y cómo responder
+
+#### 📧 Respuesta directa al cliente
+- Cuando soporte/SAMU responde al email escalado, **la respuesta va directamente al cliente**
+- El Reply-To apunta al email del cliente
+- **El bot NO interviene** en esa respuesta (sin bucles)
+- El asunto incluye el email del cliente para fácil identificación: `[cliente@email.com] Asunto`
+
+#### 🛡️ Protección anti-bucle mejorada
+- El bot ahora ignora emails de: contacto@, soporte@, samu@frezzyks.com
+- Evita cualquier posible bucle de reenvío
+
+### 📁 Archivos modificados
+- `email.js` - Nueva función `reenviarCorreo()` rediseñada + bloqueo de emails internos
+
+---
+
 ## [1.1.1] - 2026-03-05
 
 ### ✨ Nuevas funcionalidades
