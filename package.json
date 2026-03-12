@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node index.js",
     "verify-env": "node verify-env.js",
-    "prestart": "node verify-env.js"
+    "prestart": "node verify-env.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "author": "",
   "license": "ISC",
@@ -23,5 +26,8 @@
     "nodemailer": "^7.0.3",
     "openai": "^5.0.2",
     "resend": "^6.6.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
   }
 }
