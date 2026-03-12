@@ -4,6 +4,58 @@ Todas las versiones y cambios notables del bot de atención al cliente.
 
 ---
 
+## [1.2.0] - 2026-03-12
+
+### ✨ Nuevas funcionalidades
+
+#### 📝 Prompts modulares
+- El prompt del sistema ahora está dividido en **12 archivos .md** editables
+- Cada sección se puede modificar sin tocar código:
+  - `01-personalidad.md` - Tono y estilo del bot
+  - `02-reglas-antirepeticion.md` - Evitar respuestas repetidas
+  - `03-envios.md` - Información de envíos
+  - `04-devoluciones.md` - Políticas de devolución
+  - `05-pagos.md` - Pagos y facturas
+  - `06-newsletter.md` - Descuentos y newsletter
+  - `07-pedido-cuenta.md` - Pedido no aparece en cuenta
+  - `08-localizar-pedido.md` - Consultar estado de pedido
+  - `09-productos.md` - FAQ de productos
+  - `10-b2b.md` - Ventas B2B
+  - `11-colaboraciones.md` - Influencers y colaboraciones
+  - `12-escalado.md` - Reglas de SOPORTE/SAMU/etc
+- Cache inteligente: solo recarga si hay cambios en los archivos
+
+#### 🧪 Suite de tests
+- **60 tests** con Vitest cubriendo:
+  - Carga y construcción de prompts
+  - Detección de frustración y bucles
+  - Extracción de números de pedido/seguimiento
+  - Detección de intermediarios y spam
+  - Clasificación por dominio
+
+#### 🗑️ Limpieza
+- Eliminado código de WhatsApp (no se usaba)
+- Refactorizado `classifier.js` con funciones helper extraídas
+- Eliminado código duplicado (`obtenerEstadoSeguimiento`)
+
+### 📁 Archivos nuevos
+- `prompts/sections/*.md` - 12 archivos de prompt
+- `src/services/promptLoader.js` - Cargador de prompts
+- `tests/*.test.js` - Suite de tests
+- `ROADMAP.md` - Plan de mejoras del proyecto
+
+### 📁 Archivos modificados
+- `classifier.js` - Refactorizado para usar promptLoader
+- `package.json` - Scripts de test añadidos
+- `index.js` - Eliminadas referencias a WhatsApp
+
+### 📁 Archivos eliminados
+- `whatsapp.js`
+
+**Rama**: `fase-1/arquitectura-y-prompts`
+
+---
+
 ## [1.1.2] - 2026-03-09
 
 ### ✨ Nuevas funcionalidades
