@@ -2,9 +2,7 @@
 require('dotenv').config();
 const express = require('express');
 const crypto = require('node:crypto');
-const { iniciarWhatsapp } = require('./whatsapp');
 const { iniciarEmailListener, mostrarUltimoEmail } = require('./email');
-const { enviarMensajeWhatsapp } = require('./whatsapp');
 const { clasificarYResponder } = require('./classifier');
 const { logInfo } = require('./logger');
 const { obtenerMetricas, mostrarMetricas } = require('./metricas');
@@ -93,16 +91,7 @@ app.get('/shopify/callback', async (req, res) => {
   }
 });
 
-app.post('/webhook', async (req, res) => {
-  const mensaje = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-  if (mensaje) {
-    const texto = mensaje.text?.body;
-    const respuesta = await clasificarYResponder(texto);
-    if (respuesta) {
-    }
-  }
-  res.sendStatus(200);
-});
+
 
 const PORT = process.env.PORT || 3000;
 
