@@ -1,63 +1,12 @@
 // tests/classifier.test.js
 import { describe, it, expect } from 'vitest';
-
-// Importamos las funciones internas que queremos testear
-// Como están en el módulo, las recreamos aquí para testear la lógica
-
-/**
- * Detecta si el cliente está frustrado basándose en patrones de texto
- */
-function detectarFrustracion(mensaje) {
-  const mensajeLower = mensaje.toLowerCase();
-  const patronesFrustracion = [
-    'ya me dijiste', 'ya me has dicho', 'eso ya lo sé', 'eso ya lo se',
-    'no me sirve', 'no me vale', 'no entiendes', 'no me entiendes',
-    'otra vez lo mismo', 'siempre lo mismo', 'me repites lo mismo',
-    'sigo sin', 'sigo igual', 'no me soluciona', 'no se soluciona',
-    'estoy harto', 'estoy harta', 'me estáis tomando el pelo',
-    'vaya broma', 'qué desastre', 'vergüenza', 'indignado', 'indignada',
-    'quiero hablar con alguien', 'quiero hablar con una persona',
-    'pasadme con', 'ponme con', 'un humano', 'persona real',
-    'esto es increíble', 'no puede ser', 'inadmisible'
-  ];
-  
-  return patronesFrustracion.some(patron => mensajeLower.includes(patron));
-}
-
-/**
- * Detecta si hay un bucle de conversación
- */
-function detectarBucle(historialConversacion) {
-  const respuestasDelBot = historialConversacion.filter(m => m.rol === 'bot').length;
-  return respuestasDelBot >= 2 && historialConversacion.length >= 4;
-}
-
-/**
- * Extrae número de pedido del mensaje
- */
-function extraerNumeroPedido(texto) {
-  const regexPedido = /#(\d{4,})|(?:número de )?pedido[:\s#]+(\d{4,})/i;
-  const match = texto.match(regexPedido);
-  return match ? (match[1] || match[2]) : null;
-}
-
-/**
- * Extrae número de seguimiento del mensaje
- */
-function extraerNumeroSeguimiento(texto) {
-  let regex = /(?:número de seguimiento|tracking|seguimiento)[:\s#]*(\d{13,})/i;
-  let match = texto.match(regex);
-  
-  if (match) return match[1];
-  
-  regex = /\b(\d{13,})\b/;
-  match = texto.match(regex);
-  
-  return match ? match[1] : null;
-}
-
-// Estados internos que NUNCA deben enviarse al cliente
-const ESTADOS_INTERNOS = ['SOPORTE', 'SAMU', 'NECESITA_PERSONA', 'SIN_RESPUESTA'];
+import {
+  detectarFrustracion,
+  detectarBucle,
+  extraerNumeroPedido,
+  extraerNumeroSeguimiento,
+  ESTADOS_INTERNOS
+} from '../classifier.js';
 
 
 describe('Classifier - Detección de Frustración', () => {

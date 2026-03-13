@@ -1,104 +1,10 @@
 // tests/email.test.js
 import { describe, it, expect } from 'vitest';
-
-// Recreamos las funciones de email.js para testearlas
-
-/**
- * Detectar si el remitente es un intermediario (no-reply, mailer, etc.)
- */
-function esIntermediario(email) {
-  const intermediarios = [
-    'mailer@shopify.com',
-    'no-reply',
-    'noreply',
-    'notifications@',
-    'notification@',
-    'automated@',
-    'donotreply@',
-    'do-not-reply@'
-  ];
-  
-  const emailLower = email.toLowerCase();
-  return intermediarios.some(pattern => emailLower.includes(pattern));
-}
-
-/**
- * Extraer email real del cliente desde el contenido (para correos de Shopify)
- */
-function extraerEmailDelContenido(texto) {
-  // Buscar patrones específicos de Shopify
-  const patronShopify = /Correo\s+electr[óo]nico:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i;
-  const matchShopify = texto.match(patronShopify);
-  if (matchShopify) {
-    return matchShopify[1];
-  }
-  
-  // Patrón genérico: buscar "Email:" o "E-mail:" seguido de un email
-  const patronGenerico = /(?:Email|E-mail):\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i;
-  const matchGenerico = texto.match(patronGenerico);
-  if (matchGenerico) {
-    return matchGenerico[1];
-  }
-  
-  return null;
-}
-
-/**
- * Clasificar emails por dominio para filtrar spam/newsletters
- */
-function clasificarPorDominio(email, asunto, texto) {
-  const emailLower = email.toLowerCase();
-  const asuntoLower = (asunto || '').toLowerCase();
-  const textoLower = (texto || '').toLowerCase();
-  
-  // Judge.me - filtrar reseñas 5 estrellas
-  if (emailLower.includes('judge.me')) {
-    if (textoLower.includes('5 star') || textoLower.includes('⭐⭐⭐⭐⭐')) {
-      return { tipo: 'IGNORAR', razon: 'Reseña positiva de Judge.me - no requiere respuesta' };
-    }
-    if (textoLower.includes('1 star') || textoLower.includes('2 star')) {
-      return { tipo: 'HUMANO', razon: 'Reseña negativa - requiere atención' };
-    }
-  }
-  
-  // Newsletters / marketing
-  const newsletterDomains = ['merkandi.es', 'mailchimp.com', 'sendinblue.com', 'newsletter@'];
-  if (newsletterDomains.some(d => emailLower.includes(d))) {
-    return { tipo: 'IGNORAR', razon: 'Newsletter/Marketing - no es cliente' };
-  }
-  
-  // Notificaciones internas de Frezzyks
-  if (emailLower.includes('frezzyks.com') && 
-      (asuntoLower.includes('new subscriber') || 
-       asuntoLower.includes('low stock') || 
-       asuntoLower.includes('pocas existencias'))) {
-    return { tipo: 'IGNORAR', razon: 'Notificación interna - no requiere respuesta' };
-  }
-  
-  // Patrones de spam comercial
-  const patronesSpamVentas = [
-    'i\'d like to help you', 'i would like to help you',
-    'drive.*sales', 'driving.*sales', 'new sales',
-    'handle the marketing', 'marketing services', 'marketing agency',
-    'no upfront cost', 'risk-free', 'risk free',
-    'would you be interested', 'are you interested',
-    'i can help you', 'we can help you',
-    'grow your business', 'scale your business',
-    'seo services', 'link building', 'backlinks',
-    'guest post', 'sponsored post',
-    'free consultation', 'free audit'
-  ];
-  
-  const esSpamVentas = patronesSpamVentas.some(patron => 
-    textoLower.includes(patron) || asuntoLower.includes(patron)
-  );
-  
-  if (esSpamVentas) {
-    return { tipo: 'IGNORAR', razon: 'Spam comercial / Oferta de servicios no solicitada' };
-  }
-  
-  return { tipo: 'PROCESAR', razon: 'Email normal de cliente' };
-}
+import {
+  esIntermediario,
+  extraerEmailDelContenido,
+  clasificarPorDominio
+} from '../email.js';
 
 
 describe('Email - Detección de Intermediarios', () => {

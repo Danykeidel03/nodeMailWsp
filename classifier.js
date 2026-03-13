@@ -227,5 +227,12 @@ async function clasificarYResponder(mensaje, destinatario, asunto, historialConv
 
 module.exports = {
   clasificarYResponder,
-  ESTADOS_INTERNOS
+  ESTADOS_INTERNOS,
+  // Exportar funciones internas para testeo
+  detectarFrustracion,
+  detectarBucle,
+  extraerNumeroPedido,
+  extraerNumeroSeguimiento,
+  obtenerInfoPedido,
+  obtenerInfoSeguimiento
 };
