@@ -41,54 +41,25 @@ describe('Email - Extracción de Email del Contenido', () => {
 
 describe('Email - Clasificación por Dominio', () => {
   
-  describe('Judge.me', () => {
-    test.each([
-      ['reviews@judge.me', 'Nueva reseña', 'You received a 5 star review!', 'IGNORAR'],
-      ['reviews@judge.me', 'Nueva reseña', 'You received a 1 star review', 'HUMANO'],
-    ])('judge.me %s -> %s', (email, asunto, texto, expected) => {
-      const result = clasificarPorDominio(email, asunto, texto);
-      expect(result.tipo).toBe(expected);
-    });
-  });
-
-  describe('Newsletters', () => {
-    test.each([
-      ['promo@mailchimp.com', 'Oferta', '', 'IGNORAR'],
-      ['info@sendinblue.com', 'Newsletter', '', 'IGNORAR'],
-    ])('newsletter %s -> %s', (email, asunto, texto, expected) => {
-      const result = clasificarPorDominio(email, asunto, texto);
-      expect(result.tipo).toBe(expected);
-    });
-  });
-
-  describe('Notificaciones internas', () => {
-    test.each([
-      ['sistema@frezzyks.com', 'New subscriber to newsletter', '', 'IGNORAR'],
-      ['alertas@frezzyks.com', 'Low stock alert', '', 'IGNORAR'],
-    ])('frezzyks %s -> %s', (email, asunto, texto, expected) => {
-      const result = clasificarPorDominio(email, asunto, texto);
-      expect(result.tipo).toBe(expected);
-    });
-  });
-
-  describe('Spam comercial', () => {
-    test.each([
-      ['sales@agency.com', 'Partnership', 'I would like to help you grow your business with our marketing services', 'IGNORAR'],
-      ['john@seocompany.com', 'SEO Proposal', 'We offer SEO services and link building', 'IGNORAR'],
-      ['info@consultant.com', 'Free consultation', 'Book your free consultation today', 'IGNORAR'],
-    ])('spam %s -> %s', (email, asunto, texto, expected) => {
-      const result = clasificarPorDominio(email, asunto, texto);
-      expect(result.tipo).toBe(expected);
-    });
-  });
-
-  describe('Clientes normales', () => {
-    test.each([
-      ['juan@gmail.com', '¿Dónde está mi pedido?', 'Hola, quiero saber el estado de mi pedido #1234', 'PROCESAR'],
-      ['maria@hotmail.com', 'Devolución', 'Quiero devolver un producto que llegó dañado', 'PROCESAR'],
-    ])('cliente normal %s -> %s', (email, asunto, texto, expected) => {
-      const result = clasificarPorDominio(email, asunto, texto);
-      expect(result.tipo).toBe(expected);
-    });
+  test.each([
+    // Judge.me
+    ['reviews@judge.me', 'Nueva reseña', 'You received a 5 star review!', 'IGNORAR', 'judge.me 5 star'],
+    ['reviews@judge.me', 'Nueva reseña', 'You received a 1 star review', 'HUMANO', 'judge.me 1 star'],
+    // Newsletters
+    ['promo@mailchimp.com', 'Oferta', '', 'IGNORAR', 'mailchimp'],
+    ['info@sendinblue.com', 'Newsletter', '', 'IGNORAR', 'sendinblue'],
+    // Notificaciones internas
+    ['sistema@frezzyks.com', 'New subscriber to newsletter', '', 'IGNORAR', 'frezzyks subscriber'],
+    ['alertas@frezzyks.com', 'Low stock alert', '', 'IGNORAR', 'frezzyks low stock'],
+    // Spam comercial
+    ['sales@agency.com', 'Partnership', 'I would like to help you grow your business with our marketing services', 'IGNORAR', 'spam marketing'],
+    ['john@seocompany.com', 'SEO Proposal', 'We offer SEO services and link building', 'IGNORAR', 'spam seo'],
+    ['info@consultant.com', 'Free consultation', 'Book your free consultation today', 'IGNORAR', 'spam consultation'],
+    // Clientes normales
+    ['juan@gmail.com', '¿Dónde está mi pedido?', 'Hola, quiero saber el estado de mi pedido #1234', 'PROCESAR', 'cliente normal 1'],
+    ['maria@hotmail.com', 'Devolución', 'Quiero devolver un producto que llegó dañado', 'PROCESAR', 'cliente normal 2'],
+  ])('clasificarPorDominio - %s -> %s', (email, asunto, texto, expected, _label) => {
+    const result = clasificarPorDominio(email, asunto, texto);
+    expect(result.tipo).toBe(expected);
   });
 });
