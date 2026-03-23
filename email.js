@@ -933,12 +933,5 @@ function mostrarUltimoEmail() {
 
 module.exports = {
   iniciarEmailListener,
-  mostrarUltimoEmail,
-  // Exportar funciones internas para testeo
-  esIntermediario,
-  extraerEmailDelContenido,
-  clasificarPorDominio,
-  analizarAdjuntos,
-  detectarProblemaEntrega,
-  detectarProblemaEntregaConIA
+  mostrarUltimoEmail
 };
