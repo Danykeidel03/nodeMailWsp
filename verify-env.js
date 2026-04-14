@@ -11,8 +11,6 @@ const requiredVars = [
   'EMAIL_PASS',
   'CORREOS_CLIENTE',
   'CORREOS_AUTH',
-  'WHATSAPP_PHONE_ID',
-  'WHATSAPP_TOKEN',
   'NGROK_URL'
 ];
 

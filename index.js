@@ -11,13 +11,25 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json());
 
-// Variable para almacenar el access token (en producción usa una base de datos)
-let shopifyAccessToken = null;
+// Nonces pendientes para validación CSRF del flujo OAuth de Shopify
+// Clave: shop domain, Valor: nonce generado
+const pendingNonces = new Map();
+
+// Middleware de autenticación para endpoints de métricas
+function metricsAuth(req, res, next) {
+  const token = process.env.METRICS_TOKEN;
+  if (!token) return next(); // si no está configurado, permitir (dev)
+  const provided = req.headers['x-metrics-token'] || req.query.token;
+  if (provided !== token) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
 
 // Ruta de inicio para instalar la app en Shopify
 app.get('/shopify/install', (req, res) => {
   const shop = req.query.shop;
-  
+
   if (!shop) {
     return res.status(400).send('Missing shop parameter');
   }
@@ -32,6 +44,9 @@ app.get('/shopify/install', (req, res) => {
   const redirectUri = `${process.env.NGROK_URL}/shopify/callback`;
   const nonce = crypto.randomBytes(16).toString('hex');
 
+  // Guardar el nonce para validarlo en el callback (protección CSRF)
+  pendingNonces.set(shop, nonce);
+
   const url = new URL(`https://${shop}/admin/oauth/authorize`);
   url.searchParams.append('client_id', apiKey);
   url.searchParams.append('scope', scopes);
@@ -43,9 +58,9 @@ app.get('/shopify/install', (req, res) => {
 
 // Callback de OAuth
 app.get('/shopify/callback', async (req, res) => {
-  const { shop, code } = req.query;
+  const { shop, code, state } = req.query;
 
-  if (!shop || !code) {
+  if (!shop || !code || !state) {
     return res.status(400).send('Missing parameters');
   }
 
@@ -53,6 +68,13 @@ app.get('/shopify/callback', async (req, res) => {
   if (!/^[a-zA-Z0-9\-]+\.myshopify\.com$/.test(shop)) {
     return res.status(400).send('Invalid shop domain');
   }
+
+  // Validar CSRF: el state debe coincidir con el nonce generado en /install
+  const expectedNonce = pendingNonces.get(shop);
+  if (!expectedNonce || state !== expectedNonce) {
+    return res.status(403).send('Invalid state parameter');
+  }
+  pendingNonces.delete(shop);
 
   try {
     const apiKey = process.env.SHOPIFY_API_KEY;
@@ -73,17 +95,12 @@ app.get('/shopify/callback', async (req, res) => {
     });
 
     const data = await response.json();
-    shopifyAccessToken = data.access_token;
+    const accessToken = data.access_token;
 
-    console.log('[SUCCESS] Access Token obtenido:', shopifyAccessToken);
-    console.log('Agrega esta línea a tu .env:');
-    console.log(`SHOPIFY_ACCESS_TOKEN=${shopifyAccessToken}`);
+    // Loguear solo en servidor, nunca exponer el token en la respuesta HTTP
+    console.log('[SUCCESS] Access Token obtenido. Agrégalo a tu .env como SHOPIFY_ACCESS_TOKEN');
 
-    res.send(`
-      <h1>¡Instalación exitosa!</h1>
-      <p>Access Token obtenido. Cópialo y agrégalo a tu archivo .env:</p>
-      <pre>SHOPIFY_ACCESS_TOKEN=${shopifyAccessToken}</pre>
-    `);
+    res.send('<h1>¡Instalación exitosa!</h1><p>Access Token obtenido. Cópialo desde los logs del servidor y agrégalo a tu archivo .env.</p>');
 
   } catch (error) {
     console.error('[ERROR] Error en OAuth callback:', error);
@@ -98,7 +115,7 @@ const PORT = process.env.PORT || 3000;
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
 // Endpoint para ver métricas en tiempo real
-app.get('/metricas', (req, res) => {
+app.get('/metricas', metricsAuth, (req, res) => {
   const metricas = obtenerMetricas();
   
   // Formatear como HTML para mejor visualización
@@ -243,7 +260,7 @@ app.get('/metricas', (req, res) => {
 });
 
 // Endpoint JSON para métricas (para APIs o monitoreo)
-app.get('/metricas/json', (req, res) => {
+app.get('/metricas/json', metricsAuth, (req, res) => {
   const metricas = obtenerMetricas();
   res.json(metricas);
 });

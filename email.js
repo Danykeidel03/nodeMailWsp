@@ -1,6 +1,5 @@
 // email.js
 const { simpleParser } = require('mailparser');
-const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
 const { clasificarYResponder } = require('./classifier');
 const { logRespuesta, logError, logInfo } = require('./logger');
@@ -380,326 +379,319 @@ function registrarRespuestaEnviada(threadId) {
 }
 
 function iniciarEmailListener() {
-  const imap = new Imap({
-    user: process.env.EMAIL_USER,
-    password: process.env.EMAIL_PASS,
-    host: 'frezzyks-com.correoseguro.dinaserver.com',
-    port: 993,
-    tls: true,
-    keepalive: true,
-    connTimeout: 10000, // 10 segundos timeout
-    authTimeout: 5000,  // 5 segundos timeout en auth
-    tlsOptions: { rejectUnauthorized: false } // Para certificados self-signed
-  });
-
-  let lastSeqNumber = 0; // guarda el último número de secuencia procesado
-  let isConnected = false;
+  // lastSeqNumber persiste a través de reconexiones para no reprocesar emails ya vistos
+  let lastSeqNumber = 0;
   let reconnectAttempts = 0;
-  const MAX_RECONNECT_ATTEMPTS = 5;
-  const RECONNECT_DELAY = 5000; // 5 segundos entre intentos
+  const MAX_RECONNECT_ATTEMPTS = 10;
 
   function conectar() {
-    try {
-      console.log('[IMAP] Intentando conectar...');
-      imap.connect();
-    } catch (err) {
-      console.error('[IMAP] Error en connect():', err.message);
-      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-        reconnectAttempts++;
-        console.log(`[IMAP] Reintentando conexión (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) en ${RECONNECT_DELAY}ms...`);
-        setTimeout(conectar, RECONNECT_DELAY);
-      }
-    }
-  }
+    console.log('[IMAP] Intentando conectar...');
 
-  imap.once('ready', () => {
-    console.log('[IMAP] ✅ Conectado al servidor');
-    isConnected = true;
-    reconnectAttempts = 0;
-    
-    imap.openBox('INBOX', false, (err, box) => {
-      if (err) {
-        console.error('[IMAP] Error abriendo INBOX:', err.message);
-        imap.end();
-        return;
-      }
+    // Se crea un nuevo objeto Imap en cada intento — los objetos IMAP no son reutilizables
+    const imap = new Imap({
+      user: process.env.EMAIL_USER,
+      password: process.env.EMAIL_PASS,
+      host: 'frezzyks-com.correoseguro.dinaserver.com',
+      port: 993,
+      tls: true,
+      keepalive: true,
+      connTimeout: 10000,
+      authTimeout: 5000,
+    });
 
-      console.log(`[IMAP] INBOX abierta. Total mensajes: ${box.messages.total}`);
-      lastSeqNumber = box.messages.total; // número total mensajes al iniciar
+    imap.once('ready', () => {
+      console.log('[IMAP] ✅ Conectado al servidor');
+      reconnectAttempts = 0;
 
-      imap.on('mail', (numNewMsgs) => {
-        const fetchFrom = lastSeqNumber + 1;
-        const fetchTo = lastSeqNumber + numNewMsgs;
-
-        if (fetchFrom > fetchTo) {
+      imap.openBox('INBOX', false, (err, box) => {
+        if (err) {
+          console.error('[IMAP] Error abriendo INBOX:', err.message);
+          imap.end();
           return;
         }
 
-        const fetchRange = `${fetchFrom}:${fetchTo}`;
-        lastSeqNumber = fetchTo; // actualizamos para la próxima vez
+        console.log(`[IMAP] INBOX abierta. Total mensajes: ${box.messages.total}`);
+        lastSeqNumber = box.messages.total;
 
-        const fetch = imap.seq.fetch(fetchRange, { bodies: '' });
+        imap.on('mail', (numNewMsgs) => {
+          const fetchFrom = lastSeqNumber + 1;
+          const fetchTo = lastSeqNumber + numNewMsgs;
 
-        fetch.on('message', (msg) => {
-          let buffer = '';
+          if (fetchFrom > fetchTo) return;
 
-          msg.on('body', (stream) => {
-            stream.on('data', (chunk) => {
-              buffer += chunk.toString('utf8');
-            });
+          const fetchRange = `${fetchFrom}:${fetchTo}`;
+          lastSeqNumber = fetchTo;
 
-            stream.once('end', async () => {
-              const tiempoInicio = Date.now();
-              let destinatario = 'Desconocido'; // Variable definida aquí para acceso en catch
-              
-              try {
-                const parsed = await simpleParser(buffer);
-                if (!parsed) return;
+          const fetch = imap.seq.fetch(fetchRange, { bodies: '' });
 
-                const texto = parsed.text;
-                destinatario = parsed.from?.value?.[0]?.address;
-                // 🚫 BLOQUEAR LOOP: No procesar emails internos de Frezzyks
-                const emailsInternosFrezzyks = ['contacto@frezzyks.com', 'soporte@frezzyks.com', 'samu@frezzyks.com'];
-                if (destinatario && emailsInternosFrezzyks.includes(destinatario.toLowerCase())) {
-                  logInfo(`🚫 BLOQUEADO: Email interno de ${destinatario} - evitando loop`);
-                  registrarEmailIgnorado(`loop ${destinatario}`);
-                  return;
-                }
-                const messageId = parsed.messageId;
-                const subjectOriginal = parsed.subject || 'Sin asunto';
+          fetch.on('message', (msg) => {
+            let buffer = '';
 
-                // Log personalizado: Persona, Asunto, Mensaje recibido
-                logInfo(`Persona: ${destinatario} | Asunto: ${subjectOriginal}`);
-                logInfo(`Mensaje recibido:\n${texto}`);
-                const references = parsed.references ? (Array.isArray(parsed.references) ? parsed.references.join(' ') : parsed.references) : null;
-                const inReplyTo = parsed.inReplyTo;
+            msg.on('body', (stream) => {
+              stream.on('data', (chunk) => {
+                buffer += chunk.toString('utf8');
+              });
 
-                if (!texto || !destinatario) {
-                  console.log('Correo incompleto');
-                  return;
-                }
+              stream.once('end', async () => {
+                registrarEmailRecibido();
+                const tiempoInicio = Date.now();
+                let destinatario = 'Desconocido';
 
+                try {
+                  const parsed = await simpleParser(buffer);
+                  if (!parsed) return;
 
-                // ============= VALIDACIÓN 1: INTERMEDIARIOS =============
-                // NUNCA responder a intermediarios (mailer@shopify.com, no-reply, etc.)
-                if (esIntermediario(destinatario)) {
-                  logInfo(`🚫 BLOQUEADO: Email de intermediario ${destinatario} - NO SE RESPONDE`);
-                  
-                  // Buscar Reply-To o email real en el contenido
-                  const replyTo = parsed.replyTo?.value?.[0]?.address;
-                  let emailReal = null;
-                  
-                  if (replyTo && !esIntermediario(replyTo)) {
-                    emailReal = replyTo;
-                    logInfo(`✅ Encontrado Reply-To real: ${emailReal}`);
-                  } else {
-                    // Intentar extraer el email del contenido (caso Shopify)
-                    emailReal = extraerEmailDelContenido(texto);
-                    if (emailReal && !esIntermediario(emailReal)) {
-                      logInfo(`✅ Email extraído del contenido: ${emailReal}`);
+                  const texto = parsed.text;
+                  destinatario = parsed.from?.value?.[0]?.address;
+
+                  // 🚫 BLOQUEAR LOOP: No procesar emails internos de Frezzyks
+                  const emailsInternosFrezzyks = ['contacto@frezzyks.com', 'soporte@frezzyks.com', 'samu@frezzyks.com'];
+                  if (destinatario && emailsInternosFrezzyks.includes(destinatario.toLowerCase())) {
+                    logInfo(`🚫 BLOQUEADO: Email interno de ${destinatario} - evitando loop`);
+                    registrarEmailIgnorado(`loop ${destinatario}`);
+                    return;
+                  }
+
+                  const messageId = parsed.messageId;
+                  const subjectOriginal = parsed.subject || 'Sin asunto';
+
+                  logInfo(`Persona: ${destinatario} | Asunto: ${subjectOriginal}`);
+                  logInfo(`Mensaje recibido:\n${texto}`);
+                  const references = parsed.references ? (Array.isArray(parsed.references) ? parsed.references.join(' ') : parsed.references) : null;
+                  const inReplyTo = parsed.inReplyTo;
+
+                  if (!texto || !destinatario) {
+                    console.log('Correo incompleto');
+                    return;
+                  }
+
+                  // ============= VALIDACIÓN 1: INTERMEDIARIOS =============
+                  if (esIntermediario(destinatario)) {
+                    logInfo(`🚫 BLOQUEADO: Email de intermediario ${destinatario} - NO SE RESPONDE`);
+
+                    const replyTo = parsed.replyTo?.value?.[0]?.address;
+                    let emailReal = null;
+
+                    if (replyTo && !esIntermediario(replyTo)) {
+                      emailReal = replyTo;
+                      logInfo(`✅ Encontrado Reply-To real: ${emailReal}`);
+                    } else {
+                      emailReal = extraerEmailDelContenido(texto);
+                      if (emailReal && !esIntermediario(emailReal)) {
+                        logInfo(`✅ Email extraído del contenido: ${emailReal}`);
+                      }
+                    }
+
+                    if (emailReal) {
+                      logInfo(`📧 Redirigiendo respuesta al cliente real: ${emailReal}`);
+                      destinatario = emailReal;
+                    } else {
+                      registrarIntermediario();
+                      logInfo(`⚠️ No se puede identificar destinatario real - se escala a humano`);
+                      await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, []);
+                      return;
                     }
                   }
-                  
-                  if (emailReal) {
-                    // Reemplazar destinatario con el email real y continuar el flujo normal
-                    logInfo(`📧 Redirigiendo respuesta al cliente real: ${emailReal}`);
-                    destinatario = emailReal;
-                    // NO hacer return, continuar el flujo para que se procese normalmente
+
+                  // ============= VALIDACIÓN 2: CLASIFICACIÓN POR DOMINIO =============
+                  const clasificacionDominio = clasificarPorDominio(destinatario, subjectOriginal, texto);
+                  if (clasificacionDominio.tipo === 'IGNORAR') {
+                    logInfo(`🚫 IGNORADO: ${clasificacionDominio.razon} - De: ${destinatario}`);
+                    registrarEmailIgnorado(clasificacionDominio.razon);
+                    return;
+                  } else if (clasificacionDominio.tipo === 'HUMANO') {
+                    logInfo(`👤 ESCALADO: ${clasificacionDominio.razon} - De: ${destinatario}`);
+                    const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
+                    const historialTemp = obtenerHistorialHilo(claveHiloTemp);
+                    registrarHiloEscalado(claveHiloTemp, 'soporte');
+                    registrarEmailEscalado('soporte');
+                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialTemp);
+                    return;
+                  }
+
+                  // ============= VALIDACIÓN 2.5: PROBLEMA DE ENTREGA CON IA =============
+                  const problemaEntrega = await detectarProblemaEntregaConIA(subjectOriginal, texto);
+                  if (problemaEntrega.tieneProblemaEntrega) {
+                    logInfo(`🚨 PROBLEMA ENTREGA: ${problemaEntrega.razon} - Escalando a SOPORTE - De: ${destinatario}`);
+                    const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
+                    const historialTemp = obtenerHistorialHilo(claveHiloTemp);
+                    registrarHiloEscalado(claveHiloTemp, 'soporte');
+                    registrarEmailEscalado('soporte');
+                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialTemp);
+                    return;
+                  }
+
+                  // ============= VALIDACIÓN 3: DUPLICADOS =============
+                  const claveHilo = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
+
+                  if (hiloYaEscalado(claveHilo)) {
+                    logInfo(`🔇 HILO ESCALADO: Este email ya fue delegado a soporte/SAMU. No responder. - De: ${destinatario}`);
+                    return;
+                  }
+
+                  if (yaRespondidoRecientemente(claveHilo, 30)) {
+                    logInfo(`🚫 DUPLICADO BLOQUEADO: Ya se respondió a este hilo en los últimos 30 minutos - De: ${destinatario}`);
+                    registrarDuplicado();
+                    return;
+                  }
+
+                  agregarMensajeAHilo(claveHilo, 'cliente', texto);
+                  const historial = obtenerHistorialHilo(claveHilo);
+
+                  // ============= ANÁLISIS DE ADJUNTOS =============
+                  const infoAdjuntos = analizarAdjuntos(parsed);
+                  if (infoAdjuntos.tieneAdjuntos) {
+                    logInfo(`📎 Email con ${infoAdjuntos.totalAdjuntos} adjunto(s): ${infoAdjuntos.imagenes} imagen(es), ${infoAdjuntos.documentos} documento(s)`);
+                  }
+
+                  // ============= CLASIFICACIÓN Y RESPUESTA =============
+                  const respuesta = await clasificarYResponder(texto, destinatario, subjectOriginal, historial, infoAdjuntos);
+                  logInfo(`Respuesta del bot: ${respuesta}`);
+
+                  // ============= GUARD RAILS: ESTADOS INTERNOS =============
+                  const ESTADOS_INTERNOS = ['SOPORTE', 'SAMU', 'NECESITA_PERSONA', 'SIN_RESPUESTA'];
+
+                  if (respuesta === 'SOPORTE') {
+                    registrarHiloEscalado(claveHilo, 'soporte');
+                    registrarEmailEscalado('soporte');
+                    const historialCompleto = obtenerHistorialHilo(claveHilo);
+                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
+                    logInfo(`📧 Email derivado a SOPORTE desde ${destinatario}`);
+                    return;
+                  } else if (respuesta === 'SAMU') {
+                    registrarHiloEscalado(claveHilo, 'samu');
+                    registrarEmailEscalado('samu');
+                    const historialCompleto = obtenerHistorialHilo(claveHilo);
+                    await reenviarCorreo('samu@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
+                    logInfo(`📧 Email derivado a SAMU desde ${destinatario}`);
+                    return;
+                  } else if (respuesta === 'NECESITA_PERSONA') {
+                    registrarHiloEscalado(claveHilo, 'soporte');
+                    registrarEmailEscalado('soporte');
+                    const historialCompleto = obtenerHistorialHilo(claveHilo);
+                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
+                    logInfo(`👤 Email requiere atención humana de ${destinatario}`);
+                    return;
+                  } else if (respuesta === 'SIN_RESPUESTA') {
+                    registrarEmailIgnorado('SIN_RESPUESTA');
+                    logInfo(`🔇 Sin respuesta necesaria para ${destinatario}`);
+                    return;
+                  }
+
+                  // ============= VALIDACIÓN FINAL: SEGURIDAD =============
+                  let mensajeAEnviar = null;
+
+                  if (respuesta && typeof respuesta === 'object' && respuesta.mensaje) {
+                    mensajeAEnviar = respuesta.mensaje;
+                  } else if (typeof respuesta === 'string') {
+                    if (ESTADOS_INTERNOS.includes(respuesta.trim().toUpperCase())) {
+                      registrarGuardrailActivado();
+                      logError(destinatario, new Error('Estado interno detectado en string'), `⚠️ CRÍTICO: Intentó enviar estado interno "${respuesta}" al cliente - BLOQUEADO`);
+                      const historialCompleto = obtenerHistorialHilo(claveHilo);
+                      await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
+                      return;
+                    }
+                    mensajeAEnviar = respuesta;
+                  }
+
+                  if (mensajeAEnviar) {
+                    const mensajeUpper = mensajeAEnviar.toUpperCase();
+                    const contieneTacoInterno = ESTADOS_INTERNOS.some(estado =>
+                      mensajeUpper.includes(estado) ||
+                      mensajeUpper.includes('NECESITA_PERSONA') ||
+                      mensajeUpper.includes('SIN_RESPUESTA')
+                    );
+
+                    if (contieneTacoInterno) {
+                      registrarGuardrailActivado();
+                      logError(destinatario, new Error('Mensaje con estado interno detectado'), `⚠️ CRÍTICO: Mensaje contiene estados internos - BLOQUEADO - Mensaje: ${mensajeAEnviar}`);
+                      const historialCompleto = obtenerHistorialHilo(claveHilo);
+                      await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
+                      return;
+                    }
+
+                    // ✅ TODO BIEN - Enviar respuesta al cliente
+                    agregarMensajeAHilo(claveHilo, 'bot', mensajeAEnviar);
+                    registrarRespuestaEnviada(claveHilo);
+
+                    await enviarCorreo(destinatario, mensajeAEnviar, messageId, subjectOriginal);
+                    logRespuesta(destinatario, mensajeAEnviar, 'EMAIL');
+
+                    registrarEmailAutomatizado();
+                    registrarTiempoRespuesta((Date.now() - tiempoInicio) / 1000);
+
+                    const resumenMensaje = mensajeAEnviar.substring(0, 80).replace(/\n/g, ' ');
+                    console.log(`\n📧 Mail recibido: ${destinatario}`);
+                    console.log(`✅ Respuesta dada: ${resumenMensaje}...\n`);
                   } else {
-                    logInfo(`⚠️ No se puede identificar destinatario real - se escala a humano`);
-                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, []);
-                    return;
+                    logInfo(`⚠️ Sin mensaje válido para enviar a ${destinatario}`);
                   }
-                }
 
-                // ============= VALIDACIÓN 2: CLASIFICACIÓN POR DOMINIO =============
-                const clasificacionDominio = clasificarPorDominio(destinatario, subjectOriginal, texto);
-                if (clasificacionDominio.tipo === 'IGNORAR') {
-                  logInfo(`🚫 IGNORADO: ${clasificacionDominio.razon} - De: ${destinatario}`);
-                  return;
-                } else if (clasificacionDominio.tipo === 'HUMANO') {
-                  logInfo(`👤 ESCALADO: ${clasificacionDominio.razon} - De: ${destinatario}`);
-                  const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
-                  const historialTemp = obtenerHistorialHilo(claveHiloTemp);
-                  registrarHiloEscalado(claveHiloTemp, 'soporte');
-                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialTemp);
-                  return;
+                } catch (err) {
+                  registrarError();
+                  console.error('Error parseando mensaje:', err);
+                  logError(destinatario || 'Desconocido', err, 'Error procesando email');
                 }
+              });
+            });
 
-                // ============= VALIDACIÓN 2.5: PROBLEMA DE ENTREGA CON IA =============
-                // Usar IA para detectar si hay problema crítico de entrega (dirección incorrecta, etc)
-                const problemaEntrega = await detectarProblemaEntregaConIA(subjectOriginal, texto);
-                if (problemaEntrega.tieneProblemaEntrega) {
-                  logInfo(`🚨 PROBLEMA ENTREGA: ${problemaEntrega.razon} - Escalando a SOPORTE inmediatamente - De: ${destinatario}`);
-                  const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
-                  const historialTemp = obtenerHistorialHilo(claveHiloTemp);
-                  registrarHiloEscalado(claveHiloTemp, 'soporte');
-                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialTemp);
-                  return;
-                }
-
-                // ============= VALIDACIÓN 3: DUPLICADOS =============
-                // Identificar el hilo de conversación
-                const claveHilo = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
-                
-                // Verificar si este hilo ya fue escalado a soporte/SAMU (bot no debe responder)
-                if (hiloYaEscalado(claveHilo)) {
-                  logInfo(`🔇 HILO ESCALADO: Este email ya fue delegado a soporte/SAMU. No responder. - De: ${destinatario}`);
-                  return;
-                }
-                
-                // Verificar si ya se respondió recientemente
-                if (yaRespondidoRecientemente(claveHilo, 30)) {
-                  logInfo(`🚫 DUPLICADO BLOQUEADO: Ya se respondió a este hilo en los últimos 30 minutos - De: ${destinatario}`);
-                  return;
-                }
-                
-                // Agregar el mensaje del cliente al historial ANTES de obtenerlo
-                agregarMensajeAHilo(claveHilo, 'cliente', texto);
-                
-                // Obtener historial DESPUÉS de agregar el mensaje actual (así incluye todo)
-                const historial = obtenerHistorialHilo(claveHilo);
-
-                // ============= ANÁLISIS DE ADJUNTOS =============
-                const infoAdjuntos = analizarAdjuntos(parsed);
-                if (infoAdjuntos.tieneAdjuntos) {
-                  logInfo(`📎 Email con ${infoAdjuntos.totalAdjuntos} adjunto(s): ${infoAdjuntos.imagenes} imagen(es), ${infoAdjuntos.documentos} documento(s)`);
-                }
-
-                // ============= CLASIFICACIÓN Y RESPUESTA =============
-                const respuesta = await clasificarYResponder(texto, destinatario, subjectOriginal, historial, infoAdjuntos);
-                logInfo(`Respuesta del bot: ${respuesta}`);
-
-                // ============= GUARD RAILS: ESTADOS INTERNOS =============
-                // NUNCA ENVIAR ESTADOS INTERNOS AL CLIENTE
-                const ESTADOS_INTERNOS = ['SOPORTE', 'SAMU', 'NECESITA_PERSONA', 'SIN_RESPUESTA'];
-                
-                if (respuesta === 'SOPORTE') {
-                  registrarHiloEscalado(claveHilo, 'soporte');
-                  // Obtener historial actualizado para incluir TODOS los mensajes
-                  const historialCompleto = obtenerHistorialHilo(claveHilo);
-                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
-                  logInfo(`📧 Email derivado a SOPORTE desde ${destinatario}`);
-                  return;
-                } else if (respuesta === 'SAMU') {
-                  registrarHiloEscalado(claveHilo, 'samu');
-                  const historialCompleto = obtenerHistorialHilo(claveHilo);
-                  await reenviarCorreo('samu@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
-                  logInfo(`📧 Email derivado a SAMU desde ${destinatario}`);
-                  return;
-                } else if (respuesta === 'NECESITA_PERSONA') {
-                  registrarHiloEscalado(claveHilo, 'soporte');
-                  const historialCompleto = obtenerHistorialHilo(claveHilo);
-                  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
-                  logInfo(`👤 Email requiere atención humana de ${destinatario}`);
-                  return;
-                } else if (respuesta === 'SIN_RESPUESTA') {
-                  logInfo(`🔇 Sin respuesta necesaria para ${destinatario}`);
-                  return;
-                }
-
-                // ============= VALIDACIÓN FINAL: SEGURIDAD =============
-                // Doble verificación: asegurar que NO se envíen estados internos
-                let mensajeAEnviar = null;
-                
-                if (respuesta && typeof respuesta === 'object' && respuesta.mensaje) {
-                  mensajeAEnviar = respuesta.mensaje;
-                } else if (typeof respuesta === 'string') {
-                  // Verificar que no sea un estado interno
-                  if (ESTADOS_INTERNOS.includes(respuesta.trim().toUpperCase())) {
-                    logError(destinatario, new Error('Estado interno detectado en string'), `⚠️ CRÍTICO: Intentó enviar estado interno "${respuesta}" al cliente - BLOQUEADO`);
-                    const historialCompleto = obtenerHistorialHilo(claveHilo);
-                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
-                    return;
-                  }
-                  mensajeAEnviar = respuesta;
-                }
-
-                // Verificación adicional de seguridad en el mensaje
-                if (mensajeAEnviar) {
-                  const mensajeUpper = mensajeAEnviar.toUpperCase();
-                  const contieneTacoInterno = ESTADOS_INTERNOS.some(estado => 
-                    mensajeUpper.includes(estado) || 
-                    mensajeUpper.includes('NECESITA_PERSONA') ||
-                    mensajeUpper.includes('SIN_RESPUESTA')
-                  );
-                  
-                  if (contieneTacoInterno) {
-                    logError(destinatario, new Error('Mensaje con estado interno detectado'), `⚠️ CRÍTICO: Mensaje contiene estados internos - BLOQUEADO - Mensaje: ${mensajeAEnviar}`);
-                    const historialCompleto = obtenerHistorialHilo(claveHilo);
-                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
-                    return;
-                  }
-                  
-                  // ✅ TODO BIEN - Enviar respuesta al cliente
-                  agregarMensajeAHilo(claveHilo, 'bot', mensajeAEnviar);
-                  
-                  await enviarCorreo(destinatario, mensajeAEnviar, messageId, subjectOriginal);
-                  logRespuesta(destinatario, mensajeAEnviar, 'EMAIL');
-                  
-                  // Resumen limpio
-                  const resumenMensaje = mensajeAEnviar.substring(0, 80).replace(/\n/g, ' ');
-                  console.log(`\n📧 Mail recibido: ${destinatario}`);
-                  console.log(`✅ Respuesta dada: ${resumenMensaje}...\n`);
-                  
-                  // 📊 Métricas
-                } else {
-                  logInfo(`⚠️ Sin mensaje válido para enviar a ${destinatario}`);
-                }
-
-              } catch (err) {
-                console.error('Error parseando mensaje:', err);
-                logError(destinatario || 'Desconocido', err, 'Error procesando email');
-              }
+            msg.once('attributes', (attrs) => {
+              const { uid } = attrs;
+              imap.addFlags(uid, '\\Seen', (err) => {
+                if (err) console.log('Error marcando mensaje como leído:', err);
+              });
             });
           });
 
-          msg.once('attributes', (attrs) => {
-            const { uid } = attrs;
-            imap.addFlags(uid, '\\Seen', (err) => {
-              if (err) console.log('Error marcando mensaje como leído:', err);
-            });
+          fetch.once('error', (err) => {
+            console.error('[IMAP] Error en fetch:', err.message);
+            logError('IMAP_FETCH', err, 'Error al descargar emails');
+          });
+
+          fetch.once('end', () => {
+            // Procesos completados silenciosamente
           });
         });
 
-        fetch.once('error', (err) => {
-          console.error('[IMAP] Error en fetch:', err.message);
-          logError('IMAP_FETCH', err, 'Error al descargar emails');
+        imap.on('update', (seqno, info) => {
+          // Cambios procesados silenciosamente
         });
-
-        fetch.once('end', () => {
-          // Procesos completados silenciosamente
-        });
-      });
-
-      // Evento para cambios en el estado de la carpeta
-      imap.on('update', (seqno, info) => {
-        // Cambios procesados silenciosamente
       });
     });
-  });
 
-  imap.once('error', (err) => {
-    console.error('[IMAP] ❌ Error de conexión:', err.message);
-    console.error('[IMAP] Detalles:', err);
-    isConnected = false;
-    logError('IMAP_CONNECTION', err, 'Error de conexión IMAP');
-  });
+    imap.once('error', (err) => {
+      console.error('[IMAP] ❌ Error de conexión:', err.message);
+      console.error('[IMAP] Detalles:', err);
+      logError('IMAP_CONNECTION', err, 'Error de conexión IMAP');
+    });
 
-  imap.once('end', () => {
-    console.log('[IMAP] 🔌 Conexión cerrada');
-    isConnected = false;
-    // Intentar reconectar después de 10 segundos
-    console.log('[IMAP] Reintentando conexión en 10 segundos...');
-    setTimeout(conectar, 10000);
-  });
+    imap.once('end', () => {
+      console.log('[IMAP] 🔌 Conexión cerrada');
+      reconnectAttempts++;
+      if (reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
+        const delay = Math.min(5000 * Math.pow(2, reconnectAttempts - 1), 60000);
+        console.log(`[IMAP] Reintentando conexión (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) en ${delay}ms...`);
+        setTimeout(conectar, delay);
+      } else {
+        console.error('[IMAP] ❌ Máximo de intentos de reconexión alcanzado. El listener IMAP se ha detenido.');
+        logError('IMAP_RECONNECT', new Error('Max reconnect attempts reached'), 'IMAP listener detenido permanentemente');
+      }
+    });
 
-  imap.on('close', () => {
-    console.log('[IMAP] Evento close disparado');
-    isConnected = false;
-  });
+    imap.on('close', () => {
+      console.log('[IMAP] Evento close disparado');
+    });
 
-  // Iniciar la conexión
+    try {
+      imap.connect();
+    } catch (err) {
+      console.error('[IMAP] Error en connect():', err.message);
+      reconnectAttempts++;
+      const delay = Math.min(5000 * Math.pow(2, reconnectAttempts - 1), 60000);
+      setTimeout(conectar, delay);
+    }
+  }
+
   conectar();
 }
 
@@ -901,7 +893,11 @@ function mostrarUltimoEmail() {
         fetch.on('message', (msg) => {
           msg.on('body', (stream) => {
             simpleParser(stream, (err, parsed) => {
-              if (err) throw err;
+              if (err) {
+                console.error('[IMAP] Error parseando último email:', err.message);
+                imap.end();
+                return;
+              }
 
               console.log('--- Último Email ---');
               console.log('De:', parsed.from.text);

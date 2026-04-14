@@ -14,63 +14,6 @@ if (!process.env.OPENAI_API_KEY) {
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-async function obtenerEstadoSeguimiento(numeroSeguimiento) {
-  try {
-    console.log(`[DEBUG] Consultando seguimiento: ${numeroSeguimiento}`);
-    
-    const response = await axios.post(
-      'https://www.cexpr.es/wspsc/apiRestSeguimientoEnviosk8s/json/seguimientoEnvio',
-      {
-        codigoCliente: process.env.CORREOS_CLIENTE,
-        dato: numeroSeguimiento,
-        idioma: 'ES'
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Basic ${process.env.CORREOS_AUTH}`
-        }
-      }
-    );
-    
-    const data = response.data;
-    
-    if (data.error !== 0) {
-      console.error(`[ERROR] Correos API Error: ${data.mensajeError}`);
-      return null;
-    }
-    
-    // Extraer solo la información importante para el cliente
-    const infoSimplificada = {
-      numEnvio: data.numEnvio,
-      estado: data.descEstado,
-      fecha: data.fechaEstado,
-      hora: data.horaEstado,
-      destinatario: data.nomDest,
-      ciudad: data.pobDest,
-      referencia: data.ref,
-      bultos: data.numBultos ? parseInt(data.numBultos) : 1,
-      kilos: data.kilos ? parseFloat(data.kilos) : null,
-      ultimos_eventos: data.estadoEnvios ? data.estadoEnvios.slice(-3).map(e => ({
-        estado: e.descEstado,
-        fecha: e.fechaEstado,
-        hora: e.horaEstado,
-        ubicacion: e.nombreDelegacion
-      })) : []
-    };
-    
-    console.log(`[DEBUG] Info simplificada:`, JSON.stringify(infoSimplificada, null, 2));
-    return infoSimplificada;
-  } catch (error) {
-    console.error(`[ERROR] Obtener estado de seguimiento: ${error.message}`);
-    if (error.response) {
-      console.error(`[ERROR] Status: ${error.response.status}`);
-      console.error(`[ERROR] Data:`, error.response.data);
-    }
-    return null;
-  }
-}
-
 async function clasificarYResponder(mensaje, destinatario, asunto, historialConversacion = [], infoAdjuntos = null) {
   let infoPedido = '';
   let infoSeguimiento = '';

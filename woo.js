@@ -1,12 +1,13 @@
 const axios = require('axios');
 
 async function obtenerEstadoPedido(orderNumber) {
+  const safeOrderNumber = String(orderNumber).replace(/\D/g, '');
   const shopName = process.env.SHOPIFY_SHOP_NAME;
   const accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
 
   const query = `
     query {
-      orders(first: 1, query: "name:${orderNumber}") {
+      orders(first: 1, query: "name:${safeOrderNumber}") {
         edges {
           node {
             id
