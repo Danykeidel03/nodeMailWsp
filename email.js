@@ -231,7 +231,7 @@ function clasificarPorDominio(email, asunto, texto) {
   // ============= DETECCIÓN DE SPAM / VENTAS NO SOLICITADAS =============
   // Patrones de spam comercial (gente ofreciendo servicios)
   const patronesSpamVentas = [
-    // Ofertas de servicios de marketing/ventas
+    // Cold outreach en inglés
     'i\'d like to help you', 'i would like to help you',
     'drive.*sales', 'driving.*sales', 'new sales',
     'handle the marketing', 'marketing services', 'marketing agency',
@@ -246,21 +246,43 @@ function clasificarPorDominio(email, asunto, texto) {
     // SEO / Link building spam
     'seo services', 'link building', 'backlinks',
     'guest post', 'sponsored post',
-    // Ofertas genéricas de servicios
+    // Ofertas genéricas en inglés
     'our agency', 'my agency', 'our team can',
     'free consultation', 'free audit',
     'i noticed your', 'i came across your',
-    // Cold outreach típico
     'how are you doing today', 'hope this email finds you',
-    'quick question', 'reaching out because'
+    'quick question', 'reaching out because',
+    // Cold outreach en español — agencias y servicios no solicitados
+    'soy una agencia', 'somos una agencia',
+    'agencia asociada de shopify', 'agencia de shopify',
+    'analizando el rendimiento de',
+    'me gustaría hacerte algunas preguntas',
+    'hacerte algunas preguntas sencillas',
+    'ideas rápidas que podrían ayudarte',
+    'podría ayudarte a mejorar',
+    'podría ayudarte a aumentar',
+    'me pongo en contacto para ofrecerte',
+    'me pongo en contacto para presentarte',
+    'nos ponemos en contacto para ofrecerte',
+    'hemos analizado tu tienda',
+    'encontré tu tienda',
+    'encontre tu tienda',
+    'vi tu tienda',
+    'nuestra agencia', 'mi agencia',
+    'servicios de marketing',
+    'consultoría gratuita', 'consultoria gratuita',
+    'sin coste inicial', 'sin costo inicial',
+    'a comisión', 'a comision',
   ];
   
   const esSpamVentas = patronesSpamVentas.some(patron => 
     textoLower.includes(patron) || asuntoLower.includes(patron)
   );
   
-  // Verificar también si menciona porcentajes de comisión (típico de spam de ventas)
-  const mencionaComision = /\d+%.*(?:sales|revenue|commission|comisión)/i.test(texto);
+  // Porcentajes de comisión típicos de spam de ventas/afiliados
+  const mencionaComision = /\d+%.*(?:sales|revenue|commission|comisión|pedidos|clientes|ventas)/i.test(texto)
+    || /(?:logro|acumulo|traigo|consigo).*pedidos.*%/i.test(texto)
+    || /si logro.*\d+.*pedidos/i.test(texto);
   
   // Asuntos genéricos típicos de spam
   const asuntosSpam = ['hello', 'hi there', 'quick question', 'partnership', 'opportunity', 'proposal'];
