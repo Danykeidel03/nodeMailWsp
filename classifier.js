@@ -1,31 +1,26 @@
+// classifier.js
 const { OpenAI } = require('openai');
-const axios = require('axios');
-const { obtenerEstadoPedido } = require('./woo');
 const { obtenerSeguimientoPorPedido } = require('./shopify');
 const { obtenerEstadoEnvio } = require('./seguimiento');
 const { logError } = require('./logger');
+const { construirPrompt } = require('./src/services/promptLoader');
 
 // Validar que OPENAI_API_KEY esté presente
 if (!process.env.OPENAI_API_KEY) {
-  console.error('❌ ERROR CRÍTICO: OPENAI_API_KEY no está configurado');
+  console.error('ERROR CRITICO: OPENAI_API_KEY no está configurado');
   console.error('Por favor, configura esta variable de entorno en Railway');
   process.exit(1);
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-async function clasificarYResponder(mensaje, destinatario, asunto, historialConversacion = [], infoAdjuntos = null) {
-  let infoPedido = '';
-  let infoSeguimiento = '';
-  let infoArchivosAdjuntos = '';
-  let estadoCompletoDisponible = false;
-  
-  // Procesar información de adjuntos si existe
-  if (infoAdjuntos && infoAdjuntos.tieneAdjuntos) {
-    infoArchivosAdjuntos = infoAdjuntos.resumen;
-  }
-  
-  // ============= DETECCIÓN DE FRUSTRACIÓN / REPETICIÓN =============
+// Estados internos que NUNCA deben enviarse al cliente
+const ESTADOS_INTERNOS = ['SOPORTE', 'SAMU', 'NECESITA_PERSONA', 'SIN_RESPUESTA'];
+
+/**
+ * Detecta si el cliente está frustrado basándose en patrones de texto
+ */
+function detectarFrustracion(mensaje) {
   const mensajeLower = mensaje.toLowerCase();
   const patronesFrustracion = [
     'ya me dijiste', 'ya me has dicho', 'eso ya lo sé', 'eso ya lo se',
@@ -39,42 +34,83 @@ async function clasificarYResponder(mensaje, destinatario, asunto, historialConv
     'esto es increíble', 'no puede ser', 'inadmisible'
   ];
   
-  const clienteFrustrado = patronesFrustracion.some(patron => mensajeLower.includes(patron));
-  
-  // Detectar si el bot ya respondió múltiples veces sobre el mismo tema
-  const respuestasDelBot = historialConversacion.filter(m => m.rol === 'bot').length;
-  const bucleDetectado = respuestasDelBot >= 2 && historialConversacion.length >= 4;
-  
-  if (clienteFrustrado || bucleDetectado) {
-    console.log(`[DEBUG] ${clienteFrustrado ? 'Cliente frustrado detectado' : 'Bucle de conversación detectado'} - Escalando a SOPORTE`);
-    return 'SOPORTE';
-  }
+  return patronesFrustracion.some(patron => mensajeLower.includes(patron));
+}
 
-  // Extraer número de pedido
+/**
+ * Detecta si hay un bucle de conversación (bot respondiendo lo mismo)
+ */
+function detectarBucle(historialConversacion) {
+  const respuestasDelBot = historialConversacion.filter(m => m.rol === 'bot').length;
+  return respuestasDelBot >= 2 && historialConversacion.length >= 4;
+}
+
+/**
+ * Extrae número de pedido del mensaje
+ */
+function extraerNumeroPedido(texto) {
   const regexPedido = /#(\d{4,})|(?:número de )?pedido[:\s#]+(\d{4,})/i;
-  const textoCompleto = `${mensaje} ${asunto || ''}`;
-  const matchPedido = textoCompleto.match(regexPedido);
-  let numeroPedido = null;
+  const match = texto.match(regexPedido);
+  return match ? (match[1] || match[2]) : null;
+}
+
+/**
+ * Extrae número de seguimiento del mensaje
+ */
+function extraerNumeroSeguimiento(texto) {
+  // Patrón específico con contexto
+  let regex = /(?:número de seguimiento|tracking|seguimiento)[:\s#]*(\d{13,})/i;
+  let match = texto.match(regex);
   
+  if (match) return match[1];
+  
+  // Patrón genérico: números de 13+ dígitos
+  regex = /\b(\d{13,})\b/;
+  match = texto.match(regex);
+  
+  return match ? match[1] : null;
+}
+
+/**
+ * Obtiene información del pedido desde Shopify y Correos
+ */
+async function obtenerInfoPedido(numeroPedido, destinatario) {
   try {
-    if (matchPedido) {
-      numeroPedido = matchPedido[1] || matchPedido[2];
-      console.log(`[DEBUG] Pedido detectado: #${numeroPedido}`);
-      
-      // Obtener número de seguimiento y estado del pedido
-      const infoPedidoShopify = await obtenerSeguimientoPorPedido(numeroPedido);
-      console.log(`[DEBUG] Respuesta Shopify:`, JSON.stringify(infoPedidoShopify, null, 2));
-      
-      if (infoPedidoShopify.encontrado) {
-        if (infoPedidoShopify.numeroSeguimiento) {
-          // Obtener estado del envío
-          const estadoEnvio = await obtenerEstadoEnvio(infoPedidoShopify.numeroSeguimiento);
-          
-          if (estadoEnvio.encontrado) {
-            estadoCompletoDisponible = true;
-            
-            // Agregar información completa del estado al contexto
-            infoPedido = `INFORMACIÓN DEL PEDIDO #${numeroPedido}:
+    console.log(`[DEBUG] Buscando pedido #${numeroPedido}`);
+    
+    const infoPedidoShopify = await obtenerSeguimientoPorPedido(numeroPedido);
+    console.log(`[DEBUG] Respuesta Shopify:`, JSON.stringify(infoPedidoShopify, null, 2));
+    
+    if (!infoPedidoShopify.encontrado) {
+      return {
+        texto: `No se encontró el pedido #${numeroPedido} en nuestro sistema.\n`,
+        estadoCompletoDisponible: false
+      };
+    }
+    
+    if (!infoPedidoShopify.numeroSeguimiento) {
+      return {
+        texto: `INFORMACIÓN DEL PEDIDO #${numeroPedido}:
+- El pedido está en preparación
+- Aún no tiene número de seguimiento asignado
+- Recordar al cliente: Los pedidos tardan 3-5 días hábiles en prepararse. Una vez enviado, recibirá el número de seguimiento por email/SMS.
+`,
+        estadoCompletoDisponible: false
+      };
+    }
+    
+    // Tiene número de seguimiento, consultar estado
+    const estadoEnvio = await obtenerEstadoEnvio(infoPedidoShopify.numeroSeguimiento);
+    
+    if (!estadoEnvio.encontrado) {
+      return {
+        texto: `El pedido #${numeroPedido} tiene número de seguimiento (${infoPedidoShopify.numeroSeguimiento}) pero no se puede consultar su estado en este momento.\n`,
+        estadoCompletoDisponible: false
+      };
+    }
+    
+    return {
+      texto: `INFORMACIÓN DEL PEDIDO #${numeroPedido}:
 - Estado del envío: ${estadoEnvio.estado}
 - Número de seguimiento: ${estadoEnvio.numeroSeguimiento}
 - Destinatario: ${estadoEnvio.destinatario}
@@ -82,44 +118,29 @@ async function clasificarYResponder(mensaje, destinatario, asunto, historialConv
 - Enlace de seguimiento: https://s.correosexpress.com/SeguimientoSinCP/search-es?tracking-number=${estadoEnvio.numeroSeguimiento}
 
 IMPORTANTE: Incluir el enlace de seguimiento en la respuesta de forma amigable para que el cliente pueda hacer seguimiento en tiempo real.
-`;
-          } else {
-            infoPedido = `El pedido #${numeroPedido} tiene número de seguimiento (${infoPedidoShopify.numeroSeguimiento}) pero no se puede consultar su estado en este momento.\n`;
-          }
-        } else {
-          infoPedido = `INFORMACIÓN DEL PEDIDO #${numeroPedido}:
-- El pedido está en preparación
-- Aún no tiene número de seguimiento asignado
-- Recordar al cliente: Los pedidos tardan 3-5 días hábiles en prepararse. Una vez enviado, recibirá el número de seguimiento por email/SMS.
-`;
-        }
-      } else {
-        infoPedido = `No se encontró el pedido #${numeroPedido} en nuestro sistema.\n`;
-      }
-    }
+`,
+      estadoCompletoDisponible: true
+    };
+    
   } catch (error) {
     console.error(`[ERROR] Error al obtener información del pedido:`, error.message);
     logError(destinatario || 'Desconocido', error, 'Error obteniendo info de pedido Shopify');
+    return { texto: '', estadoCompletoDisponible: false };
   }
+}
 
-  // Extraer número de seguimiento directo (números de 13+ dígitos)
-  let regexSeguimiento = /(?:número de seguimiento|tracking|seguimiento)[:\s#]*(\d{13,})/i;
-  let matchSeguimiento = textoCompleto.match(regexSeguimiento);
-  
-  if (!matchSeguimiento) {
-    regexSeguimiento = /\b(\d{13,})\b/;
-    matchSeguimiento = textoCompleto.match(regexSeguimiento);
-  }
-  
-  let numeroSeguimiento = null;
-  
-  if (matchSeguimiento && !estadoCompletoDisponible) {
-    numeroSeguimiento = matchSeguimiento[1];
-    
+/**
+ * Obtiene información de seguimiento directo
+ */
+async function obtenerInfoSeguimiento(numeroSeguimiento) {
+  try {
     const estadoEnvio = await obtenerEstadoEnvio(numeroSeguimiento);
     
-    if (estadoEnvio.encontrado) {
-      infoSeguimiento = `ESTADO DEL ENVÍO #${numeroSeguimiento}:
+    if (!estadoEnvio.encontrado) {
+      return '';
+    }
+    
+    return `ESTADO DEL ENVÍO #${numeroSeguimiento}:
 - Estado: *${estadoEnvio.estado}*
 - Destinatario: ${estadoEnvio.destinatario}
 - Última actualización: ${estadoEnvio.fecha} ${estadoEnvio.hora}
@@ -127,156 +148,60 @@ IMPORTANTE: Incluir el enlace de seguimiento en la respuesta de forma amigable p
 
 IMPORTANTE: Incluir el enlace de seguimiento en la respuesta de forma amigable.
 `;
+  } catch (error) {
+    console.error(`[ERROR] Error obteniendo seguimiento:`, error.message);
+    return '';
+  }
+}
+
+/**
+ * Clasifica el mensaje y genera una respuesta
+ */
+async function clasificarYResponder(mensaje, destinatario, asunto, historialConversacion = [], infoAdjuntos = null) {
+  
+  // === DETECCIÓN DE FRUSTRACIÓN / BUCLE ===
+  if (detectarFrustracion(mensaje)) {
+    console.log(`[DEBUG] Cliente frustrado detectado - Escalando a SOPORTE`);
+    return 'SOPORTE';
+  }
+  
+  if (detectarBucle(historialConversacion)) {
+    console.log(`[DEBUG] Bucle de conversación detectado - Escalando a SOPORTE`);
+    return 'SOPORTE';
+  }
+  
+  // === OBTENER INFORMACIÓN DE CONTEXTO ===
+  const textoCompleto = `${mensaje} ${asunto || ''}`;
+  let infoPedido = '';
+  let infoSeguimiento = '';
+  let estadoCompletoDisponible = false;
+  
+  // Buscar número de pedido
+  const numeroPedido = extraerNumeroPedido(textoCompleto);
+  if (numeroPedido) {
+    const resultado = await obtenerInfoPedido(numeroPedido, destinatario);
+    infoPedido = resultado.texto;
+    estadoCompletoDisponible = resultado.estadoCompletoDisponible;
+  }
+  
+  // Buscar número de seguimiento (solo si no tenemos estado completo del pedido)
+  if (!estadoCompletoDisponible) {
+    const numeroSeguimiento = extraerNumeroSeguimiento(textoCompleto);
+    if (numeroSeguimiento) {
+      infoSeguimiento = await obtenerInfoSeguimiento(numeroSeguimiento);
     }
   }
-
+  
+  // Filtro especial para "persona"
   if (mensaje.toLowerCase().includes('persona')) return null;
-
-  // Construir contexto de conversación previa si existe
-  let contextoConversacion = '';
-  if (historialConversacion && historialConversacion.length > 0) {
-    contextoConversacion = '\n--- HISTORIAL DE LA CONVERSACIÓN ---\n';
-    historialConversacion.forEach((msg, idx) => {
-      contextoConversacion += `${msg.rol === 'bot' ? 'TÚ (Bot)' : 'Cliente'}: ${msg.texto}\n`;
-    });
-    contextoConversacion += '--- FIN DEL HISTORIAL ---\n\n';
-  }
-
-  const prompt = `
-Eres el asistente virtual de atención al cliente de *Frezzyks*, una tienda online de golosinas liofilizadas y marshmallows gourmet. Tu estilo es:
-
-•⁠  ⁠Amable, directo, cercano y resolutivo.
-•⁠  ⁠Tuteas siempre.
-•⁠  ⁠Escribes como un/a joven majo/a y profesional (sin forzar jerga ni bromas raras).
-•⁠  ⁠Usas emojis solo al final de frases (máximo 2), y solo si el contexto lo permite.
-•⁠  ⁠Cierras siempre con: "Un saludo!!, equipo Frezzyks 🍬" (salvo en WhatsApp, donde puede ser más corto).
-
-${contextoConversacion}🚨 REGLAS CRÍTICAS ANTI-REPETICIÓN (MUY IMPORTANTE):
-
-1. **NUNCA repitas una respuesta que ya diste** - Si ya explicaste algo en el historial, NO lo vuelvas a explicar con las mismas palabras.
-
-2. **Si el cliente repite su problema o insiste:**
-   - Reconoce que entiendes su frustración
-   - NO repitas la misma información
-   - Ofrece una ALTERNATIVA o ESCALADO: "Entiendo que esto es frustrante. Voy a pasar tu caso a un compañero para que te ayude personalmente"
-   - Si no puedes ofrecer nada nuevo, responde SOPORTE para escalar a humano
-
-3. **Si el cliente parece frustrado o insatisfecho con tu respuesta anterior:**
-   - Frases como "ya me dijiste eso", "no me sirve", "eso ya lo sé", "no entiendes", "pero es que...", "sigo sin...", "otra vez lo mismo"
-   - En estos casos, responde únicamente: SOPORTE (para que un humano tome el control)
-
-4. **Si el cliente da las gracias:** respuesta CORTA ("¡De nada! Aquí estamos 😊")
-
-5. **Si el cliente hace una pregunta de seguimiento:** responde SOLO eso, sin repetir contexto.
-
-6. **Detecta bucles:** Si ves que en el historial ya respondiste 2+ veces sobre el mismo tema y el cliente sigue preguntando lo mismo, responde: SOPORTE
-
----
-${infoArchivosAdjuntos ? infoArchivosAdjuntos + '\n\n' : ''}${infoPedido ? 'INFO PEDIDO PARA EL CLIENTE:\n' + infoPedido + '\n' : ''}${infoSeguimiento ? infoSeguimiento + '\n' : ''}---
-A continuación, se describen los temas más frecuentes que puedes resolver tú:
-
-NO inventes respuestas. Si no puedes ayudar, responde únicamente con la palabra NECESITA_PERSONA.
-NO converses. Si no puedes ayudar, responde únicamente con la palabra NECESITA_PERSONA.
-
-🔹 *ENVÍOS*
-
-•⁠  ⁠Producción del pedido: tarda *3–5 días hábiles* (personalizamos y montamos todo a mano).
-•⁠  ⁠Una vez enviado, el paquete llega en *24–48 h* con Correos o *24 h* con Correos Express.
-•⁠  ⁠Si han pasado más de *5 días hábiles sin número de seguimiento, o **3 días desde el envío sin recibir el pedido*, se considera retraso.
-•⁠  ⁠El seguimiento llega al cliente por correo/SMS cuando el pedido sale de nuestras oficinas.
-•⁠  ⁠Solo enviamos a *Península y Baleares* (de momento no a Canarias, Ceuta o Melilla por dificultades con logística, aunque en un futuro nos gustaría).
-•⁠  ⁠Todos nuestros envíos actuales son exprés (no hay una opción más rápida).
-•⁠  ⁠Si el cliente se equivoca con la dirección:
-  - Si aún no se ha enviado, la corregimos sin problema.
-  - Si ya está en reparto o estacionado, podemos pedir modificación.
-  - Si no se puede entregar por culpa del cliente, *no nos hacemos responsables del coste extra*.
-•⁠  ⁠Si el número de seguimiento no se actualiza: 
-  - Indicar al cliente que contacte con la empresa de transporte, o que nos pase su número de pedido para revisar nosotros directamente.
-
-🔹 *DEVOLUCIONES / REEMBOLSOS*
-
-•⁠  ⁠*Los packs personalizados no pueden devolverse* por ser productos alimenticios hechos a medida (incluye megapacks, superpacks o packs degustación), salvo error nuestro.
-•⁠  ⁠Para el resto de productos, sí se pueden devolver.
-•⁠  ⁠Si el pedido llegó roto o equivocado:
-  - Pedimos fotos como prueba y ofrecemos una solución justa (código de descuento, nuevo envío o reembolso).
-•⁠  ⁠Los reembolsos se hacen por el mismo método de pago y pueden tardar mínimo *24–48 h* en procesarse.
-•⁠  ⁠Cubrimos los gastos de devolución *solo si el error fue nuestro* (no incluye los gastos de envío).
-
-🔹 *PAGOS / FACTURAS*
-
-•⁠  ⁠Aceptamos: *Bizum, tarjeta, Apple Pay, Google Pay y Revolut Pay*.
-•⁠  ⁠Si no reciben confirmación de pago o no encuentran su pedido:
-  - Pedimos SIEMPRE: email con el que hizo la compra + nombre completo.
-  - Ejemplo de respuesta: "Para poder ayudarte, ¿me pasas el email con el que hiciste el pedido y tu nombre completo? Así lo busco en el sistema 😊"
-•⁠  ⁠Si quieren factura:
-  - Pedimos número de pedido + datos fiscales completos.
-
-🔹 *NEWSLETTER / DESCUENTOS*
-
-•⁠  ⁠Si preguntan por el descuento de suscripción a la newsletter:
-  - El código de descuento les llega automáticamente por email tras suscribirse.
-  - **El código NO CADUCA**, pueden usarlo cuando quieran.
-  - Que revisen la carpeta de SPAM o correo no deseado, a veces llega ahí.
-  - Si no lo encuentran, que nos den el email con el que se suscribieron para reenviar el código.
-
-🔹 *PEDIDO NO APARECE EN MI CUENTA*
-
-•⁠  ⁠Si el cliente dice que no ve su pedido en su cuenta o que no le aparece:
-  - Pedir SIEMPRE desde el principio: email con el que hizo el pedido Y nombre completo.
-  - Explicar que a veces el pedido se hace con un email diferente al de la cuenta.
-  - Si hizo el pedido como invitado, no aparecerá en su cuenta pero el pedido existe igualmente.
-  - Una vez tengamos los datos, podemos buscar el pedido y darle información.
-
-🔹 *LOCALIZAR / CONSULTAR ESTADO DE PEDIDO*
-
-•⁠  ⁠Si el cliente pregunta cómo localizar su pedido, dónde está, o quiere saber el estado:
-  - PRIMERO pregunta por el número de pedido (ej: "Para poder ayudarte, ¿me pasas el número de pedido? Es un número tipo #12345 que te llegó en el email de confirmación 😊")
-  - NO escales a soporte directamente, espera a que te den el número.
-  - Una vez tengas el número de pedido, usa la información de seguimiento que tienes disponible.
-  - Si NO te dan el número de pedido después de pedirlo, entonces sí escala a SOPORTE.
-
-🔹 *PRODUCTOS / FAQ*
-
-•⁠  ⁠Las chuches liofilizadas son caramelos o gominolas sometidos a un proceso de deshidratación al vacío que les da textura crujiente y sabor concentrado.
-•⁠  ⁠Tenemos opciones sin azúcar, sin gluten y halal (consultables en filtros y fichas de producto en la web).
-•⁠  ⁠Aptas para niños, pero siempre con supervisión en menores de 3 años.
-•⁠  ⁠Hacemos packs 100 % personalizados a través de la web, y en TikTok Shop hay opciones variadas con detalles extra.
-•⁠  ⁠No se pueden elegir sabores exactos en los packs sorpresa, pero pueden ver ejemplos en la web o redes.
-•⁠  ⁠Los regalinchis no se pueden elegir, son sorpresa y exclusivos.
-
-🔹 *B2B / TIENDAS / DISTRIBUIDORES*
-
-•⁠  ⁠Si alguien quiere vender nuestros productos en su tienda:
-  - Respondemos con interés, reenviamos el mensaje a ventas@frezzyks.com
-  - Pedido mínimo actual: 4 cajas.
-  - Que dejen nombre, tienda, ciudad y forma de contacto.
-
-🔹 *COLABORACIONES / INFLUENCERS*
-
-•⁠  ⁠Contactar por email o por DM.
-•⁠  ⁠Si nos interesa, les hacemos propuesta. Si no, agradecemos el interés y les guardamos en cartera.
-•⁠  ⁠Tenemos sistema de afiliados solo en TikTok Shop. No enviamos muestras sin acuerdo previo.
-
-🔹 *RESPUESTAS AUTOMÁTICAS / ESCALADO*
-
-Si se menciona alguno de los siguientes temas:
-
-🔹 *RESPUESTAS AUTOMÁTICAS / ESCALADO*
-
-Si se menciona alguno de los siguientes temas:
-
-•⁠  ⁠Palabras como “estacionado” o estado del envío estacionado → responde únicamente con la palabra SOPORTE (sin añadir nada más).
-
-•⁠  ⁠Palabras como “caducidad”, “producto caducado”, “fecha de caducidad”, "caducado", "caducidad pasada" tambien en caso de que el mensaje ponga algo de que esta caducado → responde únicamente con la palabra SOPORTE (sin añadir nada más).
-
-•⁠  Si el mensaje del usuario contiene cualquier mención o insinuación de temas relacionados con colaboraciones, estrategia de marca, sanciones, multas, impuestos, hacienda o subvenciones, responde únicamente con la palabra "SAMU". No añadas ningún otro texto. Esto incluye sinónimos, derivados o formas informales (como "colaboración", "marca", "Hacienda", etc.).
-
-•⁠  ⁠Temas no reconocidos o muy sensibles (denuncias, problemas legales, facturación compleja, etc.) → responde únicamente con la palabra SAMU (sin añadir nada más).
-
-•⁠  ⁠Si el correo proviene de una dirección tipo "noreply" o similar (donde no se espera respuesta del cliente), ADEMAS COSAS QUE VENGAN DEL PROPIO FREZZYKS COMO PROCTOS CON POCAS EXISTENCIAS O NEW SUBSCRIBER TO FREZZYKS O SPAM → responde únicamente con la palabra SIN_RESPUESTA (sin añadir nada más).
-
-`;
-
+  
+  // === CONSTRUIR PROMPT Y LLAMAR A OPENAI ===
+  const prompt = construirPrompt({
+    historialConversacion,
+    infoAdjuntos,
+    infoPedido,
+    infoSeguimiento
+  });
 
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -288,6 +213,7 @@ Si se menciona alguno de los siguientes temas:
 
   const respuesta = completion.choices[0].message.content.trim();
 
+  // === DETECTAR ESTADOS INTERNOS ===
   if (respuesta.includes('NECESITA_PERSONA')) return 'NECESITA_PERSONA';
   if (respuesta.includes('SIN_RESPUESTA')) return 'SIN_RESPUESTA';
   if (respuesta.includes('SOPORTE')) return 'SOPORTE';
@@ -300,5 +226,13 @@ Si se menciona alguno de los siguientes temas:
 }
 
 module.exports = {
-  clasificarYResponder
+  clasificarYResponder,
+  ESTADOS_INTERNOS,
+  // Exportar funciones internas para testeo
+  detectarFrustracion,
+  detectarBucle,
+  extraerNumeroPedido,
+  extraerNumeroSeguimiento,
+  obtenerInfoPedido,
+  obtenerInfoSeguimiento
 };
