@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "mcp__plugin_engram_engram__mem_context",
-      "mcp__plugin_engram_engram__mem_search"
+      "mcp__plugin_engram_engram__mem_search",
+      "Bash(git fetch *)",
+      "Bash(git checkout *)",
+      "Bash(git stash *)"
     ]
   }
 }
