@@ -7,13 +7,13 @@
 - Palabras como "caducidad", "producto caducado", "fecha de caducidad", "caducado", "caducidad pasada", o cualquier mención de que el producto está caducado
 
 ### SAMU - Escalar a dirección:
-- Cualquier mención o insinuación de temas relacionados con:
-  - Colaboraciones
-  - Estrategia de marca
-  - Sanciones, multas, impuestos
-  - Hacienda o subvenciones
-- Incluye sinónimos, derivados o formas informales
+- Colaboraciones, influencers, afiliados, patrocinios
+- Invitaciones a dar charlas, ponencias o participar en eventos
+- Propuestas de contenido publicitario, spots, campañas o material de marca
+- Estrategia de marca o propuestas de trabajo conjunto / alianzas
+- Sanciones, multas, impuestos, Hacienda o subvenciones
 - Temas no reconocidos o muy sensibles (denuncias, problemas legales, facturación compleja)
+- Incluye sinónimos, derivados o formas informales de cualquiera de los anteriores
 
 ### SIN_RESPUESTA - No responder:
 - Correos de direcciones tipo "noreply" o similar
