@@ -305,12 +305,12 @@ function clasificarPorDominio(email, asunto, texto) {
   );
   
   // Porcentajes de comisión típicos de spam de ventas/afiliados
-  const mencionaComision = /\d+%.*(?:sales|revenue|commission|comisi[oó]n|pedidos|clientes|ventas)/i.test(texto)
-    || /comisi[oó]n.*\d+%/i.test(texto)
+  const mencionaComision = /\d+%.{0,200}(?:sales|revenue|commission|comisi[oó]n|pedidos|clientes|ventas)/i.test(texto)
+    || /comisi[oó]n.{0,100}\d+%/i.test(texto)
     || /\d+%\s+de\s+comisi[oó]n/i.test(texto)
-    || /(?:logro|acumulo|traigo|consigo|genero|traerte|conseguirte|generarte).*pedidos/i.test(texto)
+    || /(?:logro|acumulo|traigo|consigo|genero|traerte|conseguirte|generarte).{0,100}pedidos/i.test(texto)
     || /pedidos\s+(?:diarios|al\s+d[ií]a|semanales)/i.test(texto)
-    || /si logro.*\d+.*pedidos/i.test(texto)
+    || /si logro.{0,50}\d+.{0,50}pedidos/i.test(texto)
     || /te\s+(?:traigo|consigo|genero)\s+(?:clientes|ventas|pedidos)/i.test(texto);
   
   // Asuntos genéricos típicos de spam
