@@ -305,13 +305,18 @@ function clasificarPorDominio(email, asunto, texto) {
   );
   
   // Porcentajes de comisión típicos de spam de ventas/afiliados
-  const mencionaComision = /\d+%.{0,200}(?:sales|revenue|commission|comisi[oó]n|pedidos|clientes|ventas)/i.test(texto)
-    || /comisi[oó]n.{0,100}\d+%/i.test(texto)
-    || /\d+%\s+de\s+comisi[oó]n/i.test(texto)
-    || /(?:logro|acumulo|traigo|consigo|genero|traerte|conseguirte|generarte).{0,100}pedidos/i.test(texto)
-    || /pedidos\s+(?:diarios|al\s+d[ií]a|semanales)/i.test(texto)
-    || /si logro.{0,50}\d+.{0,50}pedidos/i.test(texto)
-    || /te\s+(?:traigo|consigo|genero)\s+(?:clientes|ventas|pedidos)/i.test(texto);
+  // Usamos includes() en vez de regex para evitar ReDoS sobre input externo (emails)
+  const kwComision = ['sales', 'revenue', 'commission', 'comisión', 'comision', 'pedidos', 'clientes', 'ventas'];
+  const verbosAccion = ['logro', 'acumulo', 'traigo', 'consigo', 'genero', 'traerte', 'conseguirte', 'generarte'];
+  const mencionaComision = (textoLower.includes('%') && kwComision.some(k => textoLower.includes(k)))
+    || textoLower.includes('% de comisi')
+    || verbosAccion.some(v => textoLower.includes(v) && textoLower.includes('pedido'))
+    || textoLower.includes('pedidos diarios')
+    || textoLower.includes('pedidos al día') || textoLower.includes('pedidos al dia')
+    || textoLower.includes('pedidos semanales')
+    || (textoLower.includes('si logro') && textoLower.includes('pedido'))
+    || ['te traigo', 'te consigo', 'te genero'].some(v =>
+        textoLower.includes(v) && ['clientes', 'ventas', 'pedidos'].some(k => textoLower.includes(k)));
   
   // Asuntos genéricos típicos de spam
   const asuntosSpam = ['hello', 'hi there', 'quick question', 'partnership', 'opportunity', 'proposal'];
