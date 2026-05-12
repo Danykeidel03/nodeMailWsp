@@ -33,6 +33,14 @@ const respuestasRecientes = new Map();
 // Valor: { timestamp, destinatario ('soporte' | 'samu') }
 const hilosEscalados = new Map();
 
+// Deduplicación por contenido: evita procesar el mismo email recibido N veces
+// Clave: email::asunto_normalizado, Valor: { timestamp }
+const contenidoReciente = new Map();
+
+// Deduplicación de incidencias recurrentes (ej: Correos reportando mismo paquete cada día)
+// Clave: remitente::asunto::YYYY-MM-DD, Valor: { timestamp }
+const incidenciasEscaladas = new Map();
+
 // Limpiar hilos antiguos (más de 24 horas)
 setInterval(() => {
   const ahora = Date.now();
@@ -203,21 +211,33 @@ function clasificarPorDominio(email, asunto, texto) {
   const asuntoLower = (asunto || '').toLowerCase();
   const textoLower = (texto || '').toLowerCase();
   
-  // Judge.me - filtrar reseñas 5 estrellas
+  // Judge.me - ignorar todas las notificaciones (no responder a judge.me)
   if (emailLower.includes('judge.me')) {
-    if (textoLower.includes('5 star') || textoLower.includes('⭐⭐⭐⭐⭐')) {
-      return { tipo: 'IGNORAR', razon: 'Reseña positiva de Judge.me - no requiere respuesta' };
-    }
-    // Si es 1-2 estrellas, sí requiere atención
-    if (textoLower.includes('1 star') || textoLower.includes('2 star')) {
-      return { tipo: 'HUMANO', razon: 'Reseña negativa - requiere atención' };
-    }
+    return { tipo: 'IGNORAR', razon: 'Notificación de Judge.me - no requiere respuesta' };
   }
-  
+
   // Newsletters / marketing
-  const newsletterDomains = ['merkandi.es', 'mailchimp.com', 'sendinblue.com', 'newsletter@'];
+  const newsletterDomains = [
+    'merkandi.es', 'mailchimp.com', 'sendinblue.com', 'newsletter@',
+    'shop.tiktok.com',       // TikTok Shop — marketing puro
+    'wakeupformacion.es',    // Cursos bonificados — no cliente
+    'asesor.wakeupformacion.es',
+  ];
   if (newsletterDomains.some(d => emailLower.includes(d))) {
     return { tipo: 'IGNORAR', razon: 'Newsletter/Marketing - no es cliente' };
+  }
+
+  // Detección genérica de newsletters promocionales por contenido
+  const patronesNewsletter = [
+    'unsubscribe', 'darse de baja', 'cancelar suscripci',
+    'ver en el navegador', 'view in browser', 'view this email',
+    'all rights reserved', 'todos los derechos reservados',
+    'ya no deseas recibir', 'haz clic aquí para cancelar',
+    'política de privacidad', 'privacy policy',
+  ];
+  const esNewsletter = patronesNewsletter.some(p => textoLower.includes(p));
+  if (esNewsletter) {
+    return { tipo: 'IGNORAR', razon: 'Email promocional con footer de newsletter detectado' };
   }
   
   // Notificaciones internas de Frezzyks
@@ -273,6 +293,11 @@ function clasificarPorDominio(email, asunto, texto) {
     'consultoría gratuita', 'consultoria gratuita',
     'sin coste inicial', 'sin costo inicial',
     'a comisión', 'a comision',
+    'te traigo pedidos', 'traerte pedidos', 'conseguirte pedidos',
+    'pedidos a comisión', 'pedidos a comision',
+    'a cambio de un porcentaje', 'a cambio de una comisión',
+    'puedo conseguirte', 'puedo traerte', 'puedo generarte',
+    'clientes diarios', 'ventas diarias',
   ];
   
   const esSpamVentas = patronesSpamVentas.some(patron => 
@@ -280,9 +305,13 @@ function clasificarPorDominio(email, asunto, texto) {
   );
   
   // Porcentajes de comisión típicos de spam de ventas/afiliados
-  const mencionaComision = /\d+%.*(?:sales|revenue|commission|comisión|pedidos|clientes|ventas)/i.test(texto)
-    || /(?:logro|acumulo|traigo|consigo).*pedidos.*%/i.test(texto)
-    || /si logro.*\d+.*pedidos/i.test(texto);
+  const mencionaComision = /\d+%.*(?:sales|revenue|commission|comisi[oó]n|pedidos|clientes|ventas)/i.test(texto)
+    || /comisi[oó]n.*\d+%/i.test(texto)
+    || /\d+%\s+de\s+comisi[oó]n/i.test(texto)
+    || /(?:logro|acumulo|traigo|consigo|genero|traerte|conseguirte|generarte).*pedidos/i.test(texto)
+    || /pedidos\s+(?:diarios|al\s+d[ií]a|semanales)/i.test(texto)
+    || /si logro.*\d+.*pedidos/i.test(texto)
+    || /te\s+(?:traigo|consigo|genero)\s+(?:clientes|ventas|pedidos)/i.test(texto);
   
   // Asuntos genéricos típicos de spam
   const asuntosSpam = ['hello', 'hi there', 'quick question', 'partnership', 'opportunity', 'proposal'];
@@ -301,20 +330,26 @@ async function detectarProblemaEntregaConIA(asunto, texto) {
     const { OpenAI } = require('openai');
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const analisisPrompt = `Analiza el siguiente email y determina si el cliente está reportando un problema crítico de entrega:
-1. Paquete entregado en dirección incorrecta/diferente
-2. Paquete entregado en domicilio equivocado
-3. Problema de dirección que requiere intervención humana
+    const analisisPrompt = `Analiza el siguiente email. Responde SOPORTE ÚNICAMENTE si el cliente describe explícitamente que su paquete físico fue entregado en una dirección equivocada o en casa de otra persona.
+
+Responde SOPORTE solo si:
+- El paquete fue entregado en una dirección incorrecta, diferente o en casa de otra persona
+- El paquete fue entregado en un domicilio equivocado
+- El paquete fue perdido o robado físicamente
+
+Responde NORMAL en TODOS los demás casos, incluyendo:
+- Consultas sobre el estado del pedido o del envío
+- Código de descuento o cupón que no funciona
+- Preguntas de facturación, pago o factura
+- Retrasos normales en la entrega
+- Cualquier mención de "pedido" sin un problema de dirección física
+- Notificaciones automáticas de Correos sobre paquetes estacionados o pendientes de recogida
 
 Email:
 Asunto: ${asunto}
 Texto: ${texto}
 
-Responde SOLO con una palabra:
-- "SOPORTE" si hay un problema crítico de entrega/dirección que requiere humano
-- "NORMAL" si es solo una consulta normal de estado o no hay problema de dirección
-
-NO añadas explicación, solo la palabra.`;
+Responde solo una palabra: SOPORTE o NORMAL`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -384,6 +419,53 @@ function yaRespondidoRecientemente(threadId, minutos = 30) {
   const minutosTranscurridos = tiempoTranscurrido / (1000 * 60);
   
   return minutosTranscurridos < minutos;
+}
+
+// Dominios de notificaciones automáticas que deben ignorarse silenciosamente
+// (no tienen remitente real recuperable, nunca necesitan escalación humana)
+function esNotificacionAutomaticaIgnorable(email) {
+  const emailLower = email.toLowerCase();
+  const dominios = [
+    'facebookmail.com', 'notification@facebook', 'notifications@facebook',
+    'mail.instagram.com', 'notify.twitter.com', 'notifications.google.com',
+    'accounts.google.com', 'no-reply@linkedin.com',
+  ];
+  return dominios.some(d => emailLower.includes(d));
+}
+
+// Comprueba si ya se procesó un email con este remitente+asunto en la ventana indicada
+function yaProcessadoContenido(email, asunto, ventanaMs = 300000) {
+  const clave = `${email.toLowerCase()}::${(asunto || '').toLowerCase().trim()}`;
+  const registro = contenidoReciente.get(clave);
+  if (!registro) return false;
+  return (Date.now() - registro.timestamp) < ventanaMs;
+}
+
+function registrarContenidoProcesado(email, asunto) {
+  const clave = `${email.toLowerCase()}::${(asunto || '').toLowerCase().trim()}`;
+  contenidoReciente.set(clave, { timestamp: Date.now() });
+  // Limpiar entradas antiguas (> 10 minutos)
+  for (const [k, v] of contenidoReciente.entries()) {
+    if (Date.now() - v.timestamp > 10 * 60 * 1000) contenidoReciente.delete(k);
+  }
+}
+
+// Dedup para incidencias recurrentes del mismo día (ej: Correos reportando mismo paquete)
+function claveIncidenciaHoy(remitente, asunto) {
+  const dia = new Date().toISOString().split('T')[0];
+  return `${remitente.toLowerCase()}::${(asunto || '').toLowerCase().trim()}::${dia}`;
+}
+
+function yaEscaladaIncidenciaHoy(clave) {
+  return incidenciasEscaladas.has(clave);
+}
+
+function registrarIncidenciaEscalada(clave) {
+  incidenciasEscaladas.set(clave, { timestamp: Date.now() });
+  // Limpiar entradas de más de 48 horas
+  for (const [k, v] of incidenciasEscaladas.entries()) {
+    if (Date.now() - v.timestamp > 48 * 60 * 60 * 1000) incidenciasEscaladas.delete(k);
+  }
 }
 
 // Registrar que se envió una respuesta
@@ -507,6 +589,10 @@ function iniciarEmailListener() {
                     if (emailReal) {
                       logInfo(`📧 Redirigiendo respuesta al cliente real: ${emailReal}`);
                       destinatario = emailReal;
+                    } else if (esNotificacionAutomaticaIgnorable(destinatario)) {
+                      logInfo(`🔇 IGNORADO: Notificación automática sin remitente recuperable - ${destinatario}`);
+                      registrarEmailIgnorado(`notificación automática ignorable ${destinatario}`);
+                      return;
                     } else {
                       registrarIntermediario();
                       logInfo(`⚠️ No se puede identificar destinatario real - se escala a humano`);
@@ -534,6 +620,14 @@ function iniciarEmailListener() {
                   // ============= VALIDACIÓN 2.5: PROBLEMA DE ENTREGA CON IA =============
                   const problemaEntrega = await detectarProblemaEntregaConIA(subjectOriginal, texto);
                   if (problemaEntrega.tieneProblemaEntrega) {
+                    // Dedup: no re-escalar la misma incidencia más de una vez al día
+                    const claveIncidencia = claveIncidenciaHoy(destinatario, subjectOriginal);
+                    if (yaEscaladaIncidenciaHoy(claveIncidencia)) {
+                      logInfo(`🔁 INCIDENCIA YA ESCALADA HOY: ${destinatario} - "${subjectOriginal}" - registrando sin nueva notificación`);
+                      return;
+                    }
+                    registrarIncidenciaEscalada(claveIncidencia);
+
                     logInfo(`🚨 PROBLEMA ENTREGA: ${problemaEntrega.razon} - Escalando a SOPORTE - De: ${destinatario}`);
                     const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
                     const historialTemp = obtenerHistorialHilo(claveHiloTemp);
@@ -544,6 +638,15 @@ function iniciarEmailListener() {
                   }
 
                   // ============= VALIDACIÓN 3: DUPLICADOS =============
+
+                  // Dedup por contenido: mismo remitente+asunto en ventana de 5 min
+                  // Evita doble procesamiento de formularios Shopify y envíos duplicados del servidor
+                  if (yaProcessadoContenido(destinatario, subjectOriginal)) {
+                    logInfo(`🚫 CONTENIDO DUPLICADO BLOQUEADO: ${destinatario} - "${subjectOriginal}" ya fue procesado en los últimos 5 min`);
+                    registrarDuplicado();
+                    return;
+                  }
+
                   const claveHilo = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
 
                   if (hiloYaEscalado(claveHilo)) {
@@ -557,6 +660,7 @@ function iniciarEmailListener() {
                     return;
                   }
 
+                  registrarContenidoProcesado(destinatario, subjectOriginal);
                   agregarMensajeAHilo(claveHilo, 'cliente', texto);
                   const historial = obtenerHistorialHilo(claveHilo);
 
@@ -568,7 +672,8 @@ function iniciarEmailListener() {
 
                   // ============= CLASIFICACIÓN Y RESPUESTA =============
                   const respuesta = await clasificarYResponder(texto, destinatario, subjectOriginal, historial, infoAdjuntos);
-                  logInfo(`Respuesta del bot: ${respuesta}`);
+                  const respuestaLog = typeof respuesta === 'object' ? JSON.stringify(respuesta) : respuesta;
+                  logInfo(`Respuesta del bot: ${respuestaLog}`);
 
                   // ============= GUARD RAILS: ESTADOS INTERNOS =============
                   const ESTADOS_INTERNOS = ['SOPORTE', 'SAMU', 'NECESITA_PERSONA', 'SIN_RESPUESTA'];
