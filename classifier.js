@@ -12,7 +12,15 @@ if (!process.env.OPENAI_API_KEY) {
   process.exit(1);
 }
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Permite inyectar un cliente OpenAI alternativo en tests (no usar en producción)
+function _setOpenAIForTesting(mockClient) {
+  openai = mockClient;
+}
+function _resetOpenAI() {
+  openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
 
 // Estados internos que NUNCA deben enviarse al cliente
 const ESTADOS_INTERNOS = ['SOPORTE', 'SAMU', 'NECESITA_PERSONA', 'SIN_RESPUESTA'];
@@ -155,7 +163,15 @@ IMPORTANTE: Incluir el enlace de seguimiento en la respuesta de forma amigable.
 }
 
 /**
- * Clasifica el mensaje y genera una respuesta
+ * Clasifica un mensaje entrante y genera la respuesta adecuada.
+ * Detecta frustración, bucles, extrae pedidos/seguimientos y consulta OpenAI.
+ *
+ * @param {string} mensaje - Cuerpo del email del cliente.
+ * @param {string} destinatario - Email del cliente (para logging).
+ * @param {string} [asunto] - Asunto del email.
+ * @param {Array<{rol: 'cliente'|'bot', texto: string, timestamp?: number}>} [historialConversacion=[]] - Historial previo del hilo.
+ * @param {object | null} [infoAdjuntos=null] - Información sobre adjuntos detectados (ver analizarAdjuntos en email.js).
+ * @returns {Promise<string | {destinatario: string, mensaje: string}>} Texto plano o estado interno ('SOPORTE' | 'SAMU' | 'NECESITA_PERSONA' | 'SIN_RESPUESTA'), o un objeto con destinatario+mensaje cuando se genera una respuesta directa.
  */
 async function clasificarYResponder(mensaje, destinatario, asunto, historialConversacion = [], infoAdjuntos = null) {
   
@@ -234,5 +250,8 @@ module.exports = {
   extraerNumeroPedido,
   extraerNumeroSeguimiento,
   obtenerInfoPedido,
-  obtenerInfoSeguimiento
+  obtenerInfoSeguimiento,
+  // Exportado para testing — no usar fuera de tests
+  _setOpenAIForTesting,
+  _resetOpenAI
 };

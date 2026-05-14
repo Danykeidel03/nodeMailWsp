@@ -4,7 +4,7 @@ const express = require('express');
 const crypto = require('node:crypto');
 const { iniciarEmailListener, mostrarUltimoEmail } = require('./email');
 const { clasificarYResponder } = require('./classifier');
-const { logInfo } = require('./logger');
+const { logInfo, logError } = require('./logger');
 const { obtenerMetricas, mostrarMetricas } = require('./metricas');
 
 const app = express();
@@ -35,7 +35,7 @@ app.get('/shopify/install', (req, res) => {
   }
 
   // Validar formato de shop domain
-  if (!/^[a-zA-Z0-9\-]+\.myshopify\.com$/.test(shop)) {
+  if (!/^[a-zA-Z0-9-]+\.myshopify\.com$/.test(shop)) {
     return res.status(400).send('Invalid shop domain');
   }
 
@@ -65,7 +65,7 @@ app.get('/shopify/callback', async (req, res) => {
   }
 
   // Validar formato de shop domain
-  if (!/^[a-zA-Z0-9\-]+\.myshopify\.com$/.test(shop)) {
+  if (!/^[a-zA-Z0-9-]+\.myshopify\.com$/.test(shop)) {
     return res.status(400).send('Invalid shop domain');
   }
 
@@ -263,6 +263,22 @@ app.get('/metricas', metricsAuth, (req, res) => {
 app.get('/metricas/json', metricsAuth, (req, res) => {
   const metricas = obtenerMetricas();
   res.json(metricas);
+});
+
+// === GLOBAL ERROR HANDLER (must be last app.use, 4 args required by Express) ===
+app.use((err, req, res, next) => {
+  const status = err.status || err.statusCode || 500;
+  const message = err.expose ? err.message : 'Internal Server Error';
+
+  logError(req.path || 'unknown', err, `${req.method} ${req.originalUrl} -> ${status}`);
+  console.error(`[ERROR HANDLER] ${req.method} ${req.originalUrl} -> ${status}:`, err.message);
+
+  res.status(status).json({
+    error: message,
+    status,
+    path: req.originalUrl,
+    timestamp: new Date().toISOString()
+  });
 });
 
 app.listen(PORT, '0.0.0.0', () => {

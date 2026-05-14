@@ -16,7 +16,15 @@ const {
 } = require('./metricas');
 const Imap = require('imap');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+let resend = new Resend(process.env.RESEND_API_KEY);
+
+// Permite inyectar un cliente Resend alternativo en tests (no usar en producción)
+function _setResendForTesting(mockResend) {
+  resend = mockResend;
+}
+function _resetResend() {
+  resend = new Resend(process.env.RESEND_API_KEY);
+}
 
 // Almacenamiento temporal de hilos de conversación
 // Clave: email del destinatario + references/in-reply-to
@@ -211,8 +219,13 @@ function clasificarPorDominio(email, asunto, texto) {
   const asuntoLower = (asunto || '').toLowerCase();
   const textoLower = (texto || '').toLowerCase();
   
-  // Judge.me - ignorar todas las notificaciones (no responder a judge.me)
+  // Judge.me - reseñas 1 estrella requieren atención humana; el resto se ignora
   if (emailLower.includes('judge.me')) {
+    const esResenaBaja = textoLower.includes('1 star') || textoLower.includes('1-star') ||
+      textoLower.includes('1 estrella') || textoLower.includes('2 star') || textoLower.includes('2-star');
+    if (esResenaBaja) {
+      return { tipo: 'HUMANO', razon: 'Reseña negativa de Judge.me - requiere atención' };
+    }
     return { tipo: 'IGNORAR', razon: 'Notificación de Judge.me - no requiere respuesta' };
   }
 
@@ -713,9 +726,12 @@ function iniciarEmailListener() {
                   // ============= VALIDACIÓN FINAL: SEGURIDAD =============
                   let mensajeAEnviar = null;
 
+                  // @ts-ignore -- checkJs narrowing false positive; respuesta is string | object at runtime
                   if (respuesta && typeof respuesta === 'object' && respuesta.mensaje) {
+                    // @ts-ignore -- same narrowing false positive
                     mensajeAEnviar = respuesta.mensaje;
                   } else if (typeof respuesta === 'string') {
+                    // @ts-ignore -- checkJs narrowing false positive; respuesta IS string here at runtime
                     if (ESTADOS_INTERNOS.includes(respuesta.trim().toUpperCase())) {
                       registrarGuardrailActivado();
                       logError(destinatario, new Error('Estado interno detectado en string'), `⚠️ CRÍTICO: Intentó enviar estado interno "${respuesta}" al cliente - BLOQUEADO`);
@@ -827,6 +843,16 @@ function iniciarEmailListener() {
   conectar();
 }
 
+/**
+ * Envía un email de respuesta al cliente vía Resend.
+ *
+ * @param {string} destinatario - Email del cliente destinatario.
+ * @param {string} texto - Cuerpo en texto plano.
+ * @param {string} messageId - Message-ID original para threading (In-Reply-To/References).
+ * @param {string} subjectOriginal - Asunto original (se prepende "Re:" si no lo tiene).
+ * @returns {Promise<void>}
+ * @throws {Error} Si Resend devuelve un error o la conexión falla.
+ */
 async function enviarCorreo(destinatario, texto, messageId, subjectOriginal) {
   try {
     // Añadir "Re:" sólo si no está ya en el asunto
@@ -856,6 +882,17 @@ async function enviarCorreo(destinatario, texto, messageId, subjectOriginal) {
   }
 }
 
+/**
+ * Reenvía un caso escalado al equipo interno (soporte o SAMU). El cliente NO recibe copia.
+ *
+ * @param {string} destinatarioEquipo - Email del equipo (soporte@... o samu@...).
+ * @param {string} remitenteOriginal - Email del cliente original (irá en el asunto).
+ * @param {string} textoOriginal - Cuerpo del último mensaje del cliente.
+ * @param {string} subjectOriginal - Asunto original del cliente.
+ * @param {Array<{rol: 'cliente'|'bot', texto: string, timestamp: number}>} [historialConversacion=[]] - Historial completo del hilo.
+ * @returns {Promise<void>}
+ * @throws {Error} Si Resend falla.
+ */
 async function reenviarCorreo(destinatarioEquipo, remitenteOriginal, textoOriginal, subjectOriginal, historialConversacion = []) {
   try {
     // Asunto con formato de reenvío + email del cliente para fácil identificación
@@ -983,7 +1020,7 @@ ${historialTexto}
       subject: subject,
       text: cuerpoTextoPlano,
       html: cuerpoHTML,
-      reply_to: remitenteOriginal // Las respuestas van DIRECTAMENTE al cliente
+      replyTo: remitenteOriginal // Las respuestas van DIRECTAMENTE al cliente
     });
 
     if (error) {
@@ -1061,5 +1098,15 @@ function mostrarUltimoEmail() {
 
 module.exports = {
   iniciarEmailListener,
-  mostrarUltimoEmail
+  mostrarUltimoEmail,
+  // Exportado para testing — no usar fuera de tests
+  yaProcessadoContenido,
+  yaRespondidoRecientemente,
+  enviarCorreo,
+  reenviarCorreo,
+  esIntermediario,
+  extraerEmailDelContenido,
+  clasificarPorDominio,
+  _setResendForTesting,
+  _resetResend
 };

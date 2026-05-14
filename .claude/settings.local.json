@@ -5,7 +5,11 @@
       "mcp__plugin_engram_engram__mem_search",
       "Bash(git fetch *)",
       "Bash(git checkout *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(node --check /opt/lampp/htdocs/trabajos/trabajos/nodeMailWsp/email.js)",
+      "mcp__plugin_engram_engram__mem_save",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

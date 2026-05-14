@@ -1,10 +1,20 @@
 // shopify.js
-const fetch = require('node-fetch');
+const _nodeFetch = require('node-fetch');
+
+// Permite inyectar un fetch alternativo en tests (no usar en producción)
+let _fetchImpl = _nodeFetch;
+function _setFetchForTesting(mockFetch) {
+  _fetchImpl = mockFetch;
+}
+function _resetFetch() {
+  _fetchImpl = _nodeFetch;
+}
 
 /**
- * Obtiene el número de seguimiento desde el número de pedido
- * @param {string} numeroPedido - Número del pedido (ej: "5070")
- * @returns {Promise<object>} - Objeto con { encontrado, numeroPedido, numeroSeguimiento, ... }
+ * Consulta la Shopify Admin API para obtener tracking de un pedido por su número.
+ *
+ * @param {string} numeroPedido - Número del pedido (sin '#'), ej: "5070".
+ * @returns {Promise<{encontrado?: boolean, numeroPedido?: string, numeroSeguimiento?: string, estadoEntrega?: string, cliente?: string, total?: string, moneda?: string, error?: string}>}
  */
 async function obtenerSeguimientoPorPedido(numeroPedido) {
   try {
@@ -23,7 +33,7 @@ async function obtenerSeguimientoPorPedido(numeroPedido) {
 
     // Buscar directamente por nombre del pedido (order_number)
     const apiUrl = `https://${SHOPIFY_SHOP}/admin/api/2025-10/orders.json`;
-    const pedidosResponse = await fetch(`${apiUrl}?name=${numeroPedido}&status=any`, {
+    const pedidosResponse = await _fetchImpl(`${apiUrl}?name=${numeroPedido}&status=any`, {
       headers: {
         'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
         'Content-Type': 'application/json'
@@ -91,5 +101,8 @@ async function obtenerSeguimientoPorPedido(numeroPedido) {
 }
 
 module.exports = {
-  obtenerSeguimientoPorPedido
+  obtenerSeguimientoPorPedido,
+  // Exportado para testing — no usar fuera de tests
+  _setFetchForTesting,
+  _resetFetch
 };

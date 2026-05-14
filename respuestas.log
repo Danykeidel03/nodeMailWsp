@@ -1,2 +1,32 @@
 [12/12/2025 14:31:19] [INFO] ========== SERVIDOR INICIADO ==========
 [12/12/2025 14:31:19] [INFO] Email listener activado
+[14/05/2026 13:52:44] [ERROR] Error enviando email
+DESTINATARIO: dest@example.com
+ERROR: Resend API limit exceeded
+STACK: undefined
+================================================================================
+[14/05/2026 13:53:20] [ERROR] Error enviando email
+DESTINATARIO: dest@example.com
+ERROR: Resend API limit exceeded
+STACK: undefined
+================================================================================
+[14/05/2026 13:54:32] [ERROR] Error enviando email
+DESTINATARIO: dest@example.com
+ERROR: Resend API limit exceeded
+STACK: undefined
+================================================================================
+[14/05/2026 13:55:11] [ERROR] Error enviando email
+DESTINATARIO: dest@example.com
+ERROR: Resend API limit exceeded
+STACK: undefined
+================================================================================
+[14/05/2026 13:55:35] [ERROR] Error enviando email
+DESTINATARIO: dest@example.com
+ERROR: Resend API limit exceeded
+STACK: undefined
+================================================================================
+[14/05/2026 13:55:38] [ERROR] Error enviando email
+DESTINATARIO: dest@example.com
+ERROR: Resend API limit exceeded
+STACK: undefined
+================================================================================

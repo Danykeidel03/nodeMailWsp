@@ -2,9 +2,10 @@
 const axios = require('axios');
 
 /**
- * Obtiene el estado del envío desde el número de seguimiento
- * @param {string} numeroSeguimiento - Número de seguimiento (ej: "9930002528317467")
- * @returns {Promise<object>} - Objeto con { estado, destinatario, ciudad, fecha, hora, ... }
+ * Obtiene el estado del envío desde el número de seguimiento (Correos Express).
+ *
+ * @param {string} numeroSeguimiento - Número de seguimiento, ej: "9930002528317467".
+ * @returns {Promise<{encontrado?: boolean, numeroSeguimiento?: string, estado?: string, fecha?: string, hora?: string, destinatario?: string, ciudad?: string, referencia?: string, bultos?: number, kilos?: number | null, ultimos_eventos?: Array<{estado: string, fecha: string, hora: string, ubicacion: string}>, error?: string}>}
  */
 async function obtenerEstadoEnvio(numeroSeguimiento) {
   try {
