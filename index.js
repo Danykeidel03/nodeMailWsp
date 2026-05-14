@@ -94,8 +94,7 @@ app.get('/shopify/callback', async (req, res) => {
       })
     });
 
-    const data = await response.json();
-    const accessToken = data.access_token;
+    await response.json();
 
     // Loguear solo en servidor, nunca exponer el token en la respuesta HTTP
     console.log('[SUCCESS] Access Token obtenido. Agrégalo a tu .env como SHOPIFY_ACCESS_TOKEN');
@@ -271,7 +270,6 @@ app.use((err, req, res, next) => {
   const message = err.expose ? err.message : 'Internal Server Error';
 
   logError(req.path || 'unknown', err, `${req.method} ${req.originalUrl} -> ${status}`);
-  console.error(`[ERROR HANDLER] ${req.method} ${req.originalUrl} -> ${status}:`, err.message);
 
   res.status(status).json({
     error: message,

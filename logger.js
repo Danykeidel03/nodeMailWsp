@@ -49,7 +49,6 @@ function logError(destinatario, error, contexto = '') {
   const logEntry = `[${fechaHora}] [ERROR] ${contexto}\nDESTINATARIO: ${destinatario}\nERROR: ${error.message}\nSTACK: ${error.stack}\n${'='.repeat(80)}\n`;
   
   fs.appendFileSync(LOG_FILE, logEntry, 'utf8');
-  console.error(`[LOG] Error registrado para ${destinatario}: ${error.message}`);
 
   agregarLogPendiente(`Error procesando (${contexto || 'sin contexto'})\n${logEntry}`);
 }

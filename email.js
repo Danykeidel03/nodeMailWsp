@@ -535,7 +535,7 @@ function iniciarEmailListener() {
         console.log(`[IMAP] INBOX abierta. Total mensajes: ${box.messages.total}`);
         lastSeqNumber = box.messages.total;
 
-        imap.on('mail', (numNewMsgs) => {
+        imap.on('mail', (numNewMsgs) => { // NOSONAR — IMAP callback chain requires nesting
           const fetchFrom = lastSeqNumber + 1;
           const fetchTo = lastSeqNumber + numNewMsgs;
 
@@ -768,7 +768,7 @@ function iniciarEmailListener() {
                     registrarEmailAutomatizado();
                     registrarTiempoRespuesta((Date.now() - tiempoInicio) / 1000);
 
-                    const resumenMensaje = mensajeAEnviar.substring(0, 80).replace(/\n/g, ' ');
+                    const resumenMensaje = mensajeAEnviar.substring(0, 80).replaceAll('\n', ' ');
                     console.log(`\n📧 Mail recibido: ${destinatario}`);
                     console.log(`✅ Respuesta dada: ${resumenMensaje}...\n`);
                   } else {
@@ -801,7 +801,7 @@ function iniciarEmailListener() {
           });
         });
 
-        imap.on('update', (seqno, info) => {
+        imap.on('update', (seqno, info) => { // NOSONAR — IMAP callback chain requires nesting
           // Cambios procesados silenciosamente
         });
       });
@@ -950,7 +950,7 @@ ${historialTexto}
               <strong>${emisor}</strong>
               <span style="font-size: 12px; color: #999;">${fecha}</span>
             </div>
-            <div style="white-space: pre-wrap;">${msg.texto.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+            <div style="white-space: pre-wrap;">${msg.texto.replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</div>
           </div>
         `;
       });

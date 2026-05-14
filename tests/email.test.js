@@ -1,5 +1,5 @@
 // tests/email.test.js
-import { describe, it, expect } from 'vitest';
+import { describe, expect } from 'vitest';
 import {
   esIntermediario,
   extraerEmailDelContenido,

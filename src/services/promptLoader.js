@@ -1,6 +1,6 @@
 // src/services/promptLoader.js
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const PROMPTS_DIR = path.join(__dirname, '../../prompts');
 const SECTIONS_DIR = path.join(PROMPTS_DIR, 'sections');
@@ -85,7 +85,7 @@ function construirPrompt(opciones = {}) {
 
   // Construir información de adjuntos
   let infoArchivosAdjuntos = '';
-  if (infoAdjuntos && infoAdjuntos.tieneAdjuntos) {
+  if (infoAdjuntos?.tieneAdjuntos) {
     infoArchivosAdjuntos = infoAdjuntos.resumen;
   }
 

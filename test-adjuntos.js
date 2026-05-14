@@ -45,7 +45,11 @@ function analizarAdjuntos(parsed) {
   if (documentos.length > 0) {
     resumen += `- ${documentos.length} documento(s): ${documentos.map(d => d.nombre).join(', ')}\n`;
   }
-  
+
+  if (videos.length > 0) {
+    resumen += `- ${videos.length} video(s): ${videos.map(v => v.nombre).join(', ')}\n`;
+  }
+
   resumen += '\n⚠️ IMPORTANTE: El cliente YA HA ENVIADO estos archivos. NO le pidas fotos/docs.';
   
   return { tieneAdjuntos: true, resumen };

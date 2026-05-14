@@ -25,10 +25,10 @@ describe('shopify.obtenerSeguimientoPorPedido (integration)', () => {
 
   afterAll(() => {
     _resetFetch();
-    if (ORIG_SHOP !== undefined) process.env.SHOPIFY_SHOP = ORIG_SHOP;
-    else delete process.env.SHOPIFY_SHOP;
-    if (ORIG_TOKEN !== undefined) process.env.SHOPIFY_ACCESS_TOKEN = ORIG_TOKEN;
-    else delete process.env.SHOPIFY_ACCESS_TOKEN;
+    if (ORIG_SHOP === undefined) delete process.env.SHOPIFY_SHOP;
+    else process.env.SHOPIFY_SHOP = ORIG_SHOP;
+    if (ORIG_TOKEN === undefined) delete process.env.SHOPIFY_ACCESS_TOKEN;
+    else process.env.SHOPIFY_ACCESS_TOKEN = ORIG_TOKEN;
   });
 
   it('devuelve { error, encontrado: false } cuando faltan credenciales de Shopify', async () => {
