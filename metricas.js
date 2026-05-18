@@ -10,6 +10,7 @@ const metricas = {
   emailsAutomatizados: 0,
   emailsEscaladosSoporte: 0,
   emailsEscaladosSamu: 0,
+  emailsEscaladosVentas: 0,
   emailsIgnorados: 0,
   duplicadosBloqueados: 0,
   intermediariosBloqueados: 0,
@@ -54,6 +55,8 @@ function registrarEmailEscalado(destino = 'soporte') {
     metricas.emailsEscaladosSoporte++;
   } else if (destino === 'samu' || destino === 'SAMU') {
     metricas.emailsEscaladosSamu++;
+  } else if (destino === 'ventas' || destino === 'VENTAS') {
+    metricas.emailsEscaladosVentas++;
   }
 }
 
@@ -120,6 +123,7 @@ function obtenerMetricas() {
     automatizados: metricas.emailsAutomatizados,
     escaladosSoporte: metricas.emailsEscaladosSoporte,
     escaladosSamu: metricas.emailsEscaladosSamu,
+    escaladosVentas: metricas.emailsEscaladosVentas,
     ignorados: metricas.emailsIgnorados,
     procesados,
     

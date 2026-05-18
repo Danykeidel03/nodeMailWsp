@@ -9,6 +9,7 @@ const {
   reenviarCorreo,
   yaProcessadoContenido,
   yaRespondidoRecientemente,
+  detectarClienteTienda,
   _setResendForTesting,
   _resetResend
 } = await import('../../email.js');
@@ -148,6 +149,53 @@ describe('email.js — reenviarCorreo (integration)', () => {
     await expect(
       reenviarCorreo('soporte@frezzyks.com', 'c@x.com', 'cuerpo', 'Asunto')
     ).rejects.toThrow('send failed');
+  });
+});
+
+describe('T1.3 — Integración pipeline Shopify B2B Tienda → ventas@frezzyks.com', () => {
+  beforeEach(() => {
+    mockSend.mockReset();
+    _setResendForTesting(mockResend);
+  });
+
+  afterEach(() => {
+    _resetResend();
+  });
+
+  it('detectarClienteTienda detecta el payload canónico de Shopify', () => {
+    const textoShopify = 'Nombre: Juan García\nTipo De Cliente: Tienda\nCiudad: Madrid';
+    expect(detectarClienteTienda(textoShopify)).toBe(true);
+  });
+
+  it('reenviarCorreo envía a ventas@frezzyks.com cuando es el destinatario del equipo', async () => {
+    mockSend.mockResolvedValueOnce({ data: { id: 'ventas-001' }, error: null });
+    const textoShopify = 'Nombre: Juan García\nTipo De Cliente: Tienda\nCiudad: Madrid';
+
+    await reenviarCorreo('ventas@frezzyks.com', 'juan@tienda.com', textoShopify, 'Consulta B2B');
+
+    expect(mockSend).toHaveBeenCalledOnce();
+    const callArgs = mockSend.mock.calls[0][0];
+    expect(callArgs.to).toContain('ventas@frezzyks.com');
+    expect(callArgs.to).not.toContain('juan@tienda.com');
+  });
+
+  it('VALIDACIÓN 1.5 — pipeline enruta Shopify tienda a ventas@ sin responder al cliente', async () => {
+    mockSend.mockResolvedValue({ data: { id: 'ventas-pipeline-001' }, error: null });
+    const textoShopify = 'Nombre: Juan García\nTipo De Cliente: Tienda\nCiudad: Madrid';
+
+    const isShopifyTienda = detectarClienteTienda(textoShopify);
+    expect(isShopifyTienda).toBe(true);
+
+    if (isShopifyTienda) {
+      await reenviarCorreo('ventas@frezzyks.com', 'juan@tienda.com', textoShopify, 'Consulta B2B', []);
+    }
+
+    expect(mockSend).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ to: expect.arrayContaining(['ventas@frezzyks.com']) })
+    );
+    expect(mockSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ to: expect.arrayContaining(['juan@tienda.com']) })
+    );
   });
 });
 

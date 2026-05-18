@@ -61,6 +61,29 @@ function cargarPromptSistema() {
 }
 
 /**
+ * Extrae campos de formulario del texto si matchea patrón Shopify/contacto
+ */
+function extraerDatosFormulario(texto) {
+  if (!texto) return null;
+  const campos = {};
+  const nombre = texto.match(/nombre\s*[:=]\s*(.+)/i);
+  const telefono = texto.match(/(?:tel[eé]fono|phone|tel)\s*[:=]\s*(.+)/i);
+  const ciudad = texto.match(/(?:ciudad|city)\s*[:=]\s*(.+)/i);
+  const tipo = texto.match(/(?:tipo(?:\s+de\s+negocio)?|type|negocio)\s*[:=]\s*(.+)/i);
+  const email = texto.match(/(?:e?-?mail|correo)\s*[:=]\s*(.+)/i);
+  const intencion = texto.match(/(?:intenci[oó]n|mensaje|consulta|motivo)\s*[:=]\s*(.+)/i);
+  const tipoCliente = texto.match(/tipo\s+de\s+cliente\s*[:=]\s*(.+)/i);
+  if (nombre) campos.nombre = nombre[1].trim();
+  if (telefono) campos.telefono = telefono[1].trim();
+  if (ciudad) campos.ciudad = ciudad[1].trim();
+  if (tipo) campos.tipo = tipo[1].trim();
+  if (email) campos.email = email[1].trim();
+  if (intencion) campos.intencion = intencion[1].trim();
+  if (tipoCliente) campos.tipoCliente = tipoCliente[1].trim();
+  return Object.keys(campos).length > 0 ? campos : null;
+}
+
+/**
  * Construye el prompt completo con variables dinámicas
  */
 function construirPrompt(opciones = {}) {
@@ -72,6 +95,22 @@ function construirPrompt(opciones = {}) {
   } = opciones;
 
   let prompt = cargarPromptSistema();
+
+  // Construir bloque de datos de formulario si el primer mensaje los contiene
+  let bloqueFormulario = '';
+  const primerMensaje = historialConversacion[0]?.texto;
+  const datosFormulario = extraerDatosFormulario(primerMensaje);
+  if (datosFormulario) {
+    bloqueFormulario = '--- DATOS YA CONOCIDOS DEL FORMULARIO ---\n';
+    if (datosFormulario.nombre) bloqueFormulario += `Nombre: ${datosFormulario.nombre}\n`;
+    if (datosFormulario.email) bloqueFormulario += `Email: ${datosFormulario.email}\n`;
+    if (datosFormulario.telefono) bloqueFormulario += `Teléfono: ${datosFormulario.telefono}\n`;
+    if (datosFormulario.ciudad) bloqueFormulario += `Ciudad: ${datosFormulario.ciudad}\n`;
+    if (datosFormulario.tipo) bloqueFormulario += `Tipo de negocio: ${datosFormulario.tipo}\n`;
+    if (datosFormulario.tipoCliente) bloqueFormulario += `Tipo de cliente: ${datosFormulario.tipoCliente}\n`;
+    if (datosFormulario.intencion) bloqueFormulario += `Intención/consulta: ${datosFormulario.intencion}\n`;
+    bloqueFormulario += '--- FIN DE DATOS ---\n';
+  }
 
   // Construir contexto de conversación previa
   let contextoConversacion = '';
@@ -89,21 +128,25 @@ function construirPrompt(opciones = {}) {
     infoArchivosAdjuntos = infoAdjuntos.resumen;
   }
 
-  // Agregar secciones dinámicas al prompt
+  // Agregar secciones dinámicas al prompt (bloque de formulario va antes del historial)
   const seccionesDinamicas = [];
-  
+
+  if (bloqueFormulario) {
+    seccionesDinamicas.push(bloqueFormulario);
+  }
+
   if (contextoConversacion) {
     seccionesDinamicas.push(contextoConversacion);
   }
-  
+
   if (infoArchivosAdjuntos) {
     seccionesDinamicas.push(infoArchivosAdjuntos);
   }
-  
+
   if (infoPedido) {
     seccionesDinamicas.push('INFO PEDIDO PARA EL CLIENTE:\n' + infoPedido);
   }
-  
+
   if (infoSeguimiento) {
     seccionesDinamicas.push(infoSeguimiento);
   }
@@ -147,5 +190,6 @@ module.exports = {
   cargarPromptSistema,
   construirPrompt,
   invalidarCache,
-  listarSecciones
+  listarSecciones,
+  extraerDatosFormulario
 };

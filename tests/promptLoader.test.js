@@ -1,10 +1,11 @@
 // tests/promptLoader.test.js
 import { describe, it, expect, beforeEach } from 'vitest';
-import { 
-  cargarPromptSistema, 
-  construirPrompt, 
+import {
+  cargarPromptSistema,
+  construirPrompt,
   listarSecciones,
-  invalidarCache 
+  invalidarCache,
+  extraerDatosFormulario
 } from '../src/services/promptLoader.js';
 
 describe('promptLoader', () => {
@@ -59,9 +60,20 @@ describe('promptLoader', () => {
     it('debe usar cache en llamadas consecutivas', () => {
       const prompt1 = cargarPromptSistema();
       const prompt2 = cargarPromptSistema();
-      
+
       // Ambas llamadas deben devolver exactamente lo mismo (mismo objeto en cache)
       expect(prompt1).toBe(prompt2);
+    });
+
+    it('debe indicar que mensajes personalizados en pedidos requieren confirmación humana', () => {
+      const prompt = cargarPromptSistema();
+      expect(prompt).toContain('NECESITA_PERSONA');
+      expect(prompt.toLowerCase()).toContain('mensaje personalizado');
+    });
+
+    it('debe incluir regla de política concreta → NECESITA_PERSONA', () => {
+      const prompt = cargarPromptSistema();
+      expect(prompt).toContain('Si tenés duda sobre una política concreta de Frezzyks → NECESITA_PERSONA. No inventes la política.');
     });
   });
 
@@ -122,9 +134,67 @@ describe('promptLoader', () => {
         infoPedido: '',
         infoSeguimiento: ''
       });
-      
+
       expect(prompt).not.toContain('HISTORIAL DE LA CONVERSACIÓN');
       expect(prompt).not.toContain('INFO PEDIDO PARA EL CLIENTE');
     });
+
+    it('historial con campos de formulario → prompt contiene bloque DATOS YA CONOCIDOS', () => {
+      const historial = [
+        {
+          rol: 'cliente',
+          texto: 'Nombre: Juan García\nTeléfono: 612345678\nCiudad: Madrid\nTipo de negocio: Tienda de regalos'
+        }
+      ];
+
+      const prompt = construirPrompt({ historialConversacion: historial });
+      expect(prompt).toContain('--- DATOS YA CONOCIDOS DEL FORMULARIO ---');
+      expect(prompt).toContain('Juan García');
+    });
+
+    it('historial con email e intención → bloque DATOS los incluye', () => {
+      const historial = [
+        {
+          rol: 'cliente',
+          texto: 'Nombre: María José\nEmail: mariajose@gmail.com\nIntención: comprar vuestros productos\nTipo: Tienda'
+        }
+      ];
+
+      const prompt = construirPrompt({ historialConversacion: historial });
+      expect(prompt).toContain('mariajose@gmail.com');
+      expect(prompt).toContain('comprar vuestros productos');
+    });
+
+    it('historial sin campos de formulario → prompt NO contiene el bloque DATOS', () => {
+      const historial = [
+        { rol: 'cliente', texto: 'Hola, ¿dónde está mi pedido #1234?' }
+      ];
+
+      const prompt = construirPrompt({ historialConversacion: historial });
+      expect(prompt).not.toContain('--- DATOS YA CONOCIDOS DEL FORMULARIO ---');
+    });
+
+    it('historial vacío → prompt NO contiene el bloque DATOS', () => {
+      const prompt = construirPrompt({ historialConversacion: [] });
+      expect(prompt).not.toContain('--- DATOS YA CONOCIDOS DEL FORMULARIO ---');
+    });
+  });
+});
+
+describe('extraerDatosFormulario — campo tipoCliente', () => {
+  it('(a) campo presente → tipoCliente === "Tienda"', () => {
+    const campos = extraerDatosFormulario('Tipo De Cliente: Tienda\nNombre: Juan');
+    expect(campos.tipoCliente).toBe('Tienda');
+  });
+
+  it('(b) texto sin campo → tipoCliente es null/undefined', () => {
+    const campos = extraerDatosFormulario('Nombre: Juan\nCiudad: Madrid');
+    expect(campos == null || campos.tipoCliente == null).toBe(true);
+  });
+
+  it('(c) tipo de negocio existente no interfiere con tipoCliente', () => {
+    const campos = extraerDatosFormulario('Tipo de negocio: Retail\nTipo De Cliente: Mayorista');
+    expect(campos.tipo).toBe('Retail');
+    expect(campos.tipoCliente).toBe('Mayorista');
   });
 });

@@ -1,4 +1,5 @@
 // email.js
+const crypto = require('crypto');
 const { simpleParser } = require('mailparser');
 const { Resend } = require('resend');
 const { clasificarYResponder } = require('./classifier');
@@ -45,9 +46,13 @@ const hilosEscalados = new Map();
 // Clave: email::asunto_normalizado, Valor: { timestamp }
 const contenidoReciente = new Map();
 
-// Deduplicación de incidencias recurrentes (ej: Correos reportando mismo paquete cada día)
-// Clave: remitente::asunto::YYYY-MM-DD, Valor: { timestamp }
+// Deduplicación de incidencias recurrentes (ej: Correos reportando mismo paquete)
+// Clave: remitente::asunto_normalizado (sin fecha), Valor: { timestamp }
 const incidenciasEscaladas = new Map();
+
+// Deduplicación de mensajes entrantes por contenido (evita doble-fetch IMAP)
+// Clave: sha256(from::body[0..200]), Valor: timestamp
+const mensajesRecientes = new Map();
 
 // Limpiar hilos antiguos (más de 24 horas)
 setInterval(() => {
@@ -138,6 +143,11 @@ function extraerEmailDelContenido(texto) {
   return null;
 }
 
+function detectarClienteTienda(texto) {
+  if (!texto || typeof texto !== 'string') return false;
+  return /tipo\s+de\s+cliente\s*[:=]\s*tienda\s*$/im.test(texto);
+}
+
 // Analizar adjuntos del email para informar a la IA
 function analizarAdjuntos(parsed) {
   const adjuntos = parsed.attachments || [];
@@ -218,7 +228,13 @@ function clasificarPorDominio(email, asunto, texto) {
   const emailLower = email.toLowerCase();
   const asuntoLower = (asunto || '').toLowerCase();
   const textoLower = (texto || '').toLowerCase();
-  
+
+  // Dominios de proveedores conocidos — ignorar silenciosamente sin escalar
+  const DOMINIOS_PROVEEDORES = ['embaleo.es'];
+  if (DOMINIOS_PROVEEDORES.some(d => emailLower.includes(d))) {
+    return { tipo: 'IGNORAR', razon: 'proveedor' };
+  }
+
   // Judge.me - reseñas 1 estrella requieren atención humana; el resto se ignora
   if (emailLower.includes('judge.me')) {
     const esResenaBaja = textoLower.includes('1 star') || textoLower.includes('1-star') ||
@@ -468,22 +484,35 @@ function registrarContenidoProcesado(email, asunto) {
   }
 }
 
-// Dedup para incidencias recurrentes del mismo día (ej: Correos reportando mismo paquete)
-function claveIncidenciaHoy(remitente, asunto) {
-  const dia = new Date().toISOString().split('T')[0];
-  return `${remitente.toLowerCase()}::${(asunto || '').toLowerCase().trim()}::${dia}`;
+// Dedup de mensajes entrantes por contenido — evita doble procesamiento de re-entregas IMAP
+function hashMensaje(from, body) {
+  return crypto.createHash('sha256').update(`${from}::${(body || '').slice(0, 200)}`).digest('hex');
 }
 
-function yaEscaladaIncidenciaHoy(clave) {
-  return incidenciasEscaladas.has(clave);
+function esMensajeDuplicado(from, body) {
+  const hash = hashMensaje(from, body);
+  if (mensajesRecientes.has(hash)) return true;
+  mensajesRecientes.set(hash, Date.now());
+  setTimeout(() => mensajesRecientes.delete(hash), 60 * 1000);
+  return false;
 }
 
-function registrarIncidenciaEscalada(clave) {
+// Dedup para incidencias recurrentes — ventana de 48h sin componente de fecha en la clave
+function claveIncidencia(remitente, asunto) {
+  const r = remitente.toLowerCase().trim();
+  const s = (asunto || '').toLowerCase().replace(/^(re:|fwd?:)\s*/gi, '').trim();
+  return `${r}::${s}`;
+}
+
+function yaEscaladaIncidenciaReciente(remitente, asunto) {
+  return incidenciasEscaladas.has(claveIncidencia(remitente, asunto));
+}
+
+function registrarIncidenciaEscalada(remitente, asunto) {
+  const clave = claveIncidencia(remitente, asunto);
   incidenciasEscaladas.set(clave, { timestamp: Date.now() });
-  // Limpiar entradas de más de 48 horas
-  for (const [k, v] of incidenciasEscaladas.entries()) {
-    if (Date.now() - v.timestamp > 48 * 60 * 60 * 1000) incidenciasEscaladas.delete(k);
-  }
+  // El TTL de 48h es el único mecanismo de tiempo — la clave no incluye fecha
+  setTimeout(() => incidenciasEscaladas.delete(clave), 48 * 60 * 60 * 1000);
 }
 
 // Registrar que se envió una respuesta
@@ -567,7 +596,7 @@ function iniciarEmailListener() {
                   destinatario = parsed.from?.value?.[0]?.address;
 
                   // 🚫 BLOQUEAR LOOP: No procesar emails internos de Frezzyks
-                  const emailsInternosFrezzyks = ['contacto@frezzyks.com', 'soporte@frezzyks.com', 'samu@frezzyks.com'];
+                  const emailsInternosFrezzyks = ['contacto@frezzyks.com', 'soporte@frezzyks.com', 'samu@frezzyks.com', 'ventas@frezzyks.com'];
                   if (destinatario && emailsInternosFrezzyks.includes(destinatario.toLowerCase())) {
                     logInfo(`🚫 BLOQUEADO: Email interno de ${destinatario} - evitando loop`);
                     registrarEmailIgnorado(`loop ${destinatario}`);
@@ -584,6 +613,14 @@ function iniciarEmailListener() {
 
                   if (!texto || !destinatario) {
                     console.log('Correo incompleto');
+                    return;
+                  }
+
+                  // ============= VALIDACIÓN 0: DEDUP DE CONTENIDO ENTRANTE (60s) =============
+                  // Protege contra doble-fetch IMAP del mismo mensaje. Ventana corta (60s).
+                  if (esMensajeDuplicado(destinatario, texto)) {
+                    logInfo(`🔁 MENSAJE DUPLICADO IGNORADO: ${destinatario} - mismo contenido en < 60s`);
+                    registrarDuplicado();
                     return;
                   }
 
@@ -612,11 +649,28 @@ function iniciarEmailListener() {
                       registrarEmailIgnorado(`notificación automática ignorable ${destinatario}`);
                       return;
                     } else {
+                      const clasificacionIntermediario = clasificarPorDominio(destinatario, subjectOriginal, texto);
+                      if (clasificacionIntermediario.tipo === 'IGNORAR') {
+                        logInfo(`🔇 IGNORADO en bloque intermediario: ${clasificacionIntermediario.razon} - De: ${destinatario} | Asunto: ${subjectOriginal}`);
+                        registrarEmailIgnorado(clasificacionIntermediario.razon);
+                        return;
+                      }
                       registrarIntermediario();
                       logInfo(`⚠️ No se puede identificar destinatario real - se escala a humano`);
                       await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, []);
                       return;
                     }
+                  }
+
+                  // ============= VALIDACIÓN 1.5: B2B TIENDA (Shopify form) =============
+                  if (detectarClienteTienda(texto)) {
+                    logInfo(`B2B TIENDA detectado - escalando a ventas@frezzyks.com - De: ${destinatario}`);
+                    const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
+                    const historialTemp = obtenerHistorialHilo(claveHiloTemp);
+                    registrarHiloEscalado(claveHiloTemp, 'ventas');
+                    registrarEmailEscalado('ventas');
+                    await reenviarCorreo('ventas@frezzyks.com', destinatario, texto, subjectOriginal, historialTemp);
+                    return;
                   }
 
                   // ============= VALIDACIÓN 2: CLASIFICACIÓN POR DOMINIO =============
@@ -638,13 +692,12 @@ function iniciarEmailListener() {
                   // ============= VALIDACIÓN 2.5: PROBLEMA DE ENTREGA CON IA =============
                   const problemaEntrega = await detectarProblemaEntregaConIA(subjectOriginal, texto);
                   if (problemaEntrega.tieneProblemaEntrega) {
-                    // Dedup: no re-escalar la misma incidencia más de una vez al día
-                    const claveIncidencia = claveIncidenciaHoy(destinatario, subjectOriginal);
-                    if (yaEscaladaIncidenciaHoy(claveIncidencia)) {
-                      logInfo(`🔁 INCIDENCIA YA ESCALADA HOY: ${destinatario} - "${subjectOriginal}" - registrando sin nueva notificación`);
+                    // Dedup: no re-escalar la misma incidencia dentro de la ventana de 48h
+                    if (yaEscaladaIncidenciaReciente(destinatario, subjectOriginal)) {
+                      logInfo(`🔁 INCIDENCIA YA ESCALADA RECIENTEMENTE: ${destinatario} - "${subjectOriginal}" - sin nueva notificación`);
                       return;
                     }
-                    registrarIncidenciaEscalada(claveIncidencia);
+                    registrarIncidenciaEscalada(destinatario, subjectOriginal);
 
                     logInfo(`🚨 PROBLEMA ENTREGA: ${problemaEntrega.razon} - Escalando a SOPORTE - De: ${destinatario}`);
                     const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
@@ -669,12 +722,6 @@ function iniciarEmailListener() {
 
                   if (hiloYaEscalado(claveHilo)) {
                     logInfo(`🔇 HILO ESCALADO: Este email ya fue delegado a soporte/SAMU. No responder. - De: ${destinatario}`);
-                    return;
-                  }
-
-                  if (yaRespondidoRecientemente(claveHilo, 30)) {
-                    logInfo(`🚫 DUPLICADO BLOQUEADO: Ya se respondió a este hilo en los últimos 30 minutos - De: ${destinatario}`);
-                    registrarDuplicado();
                     return;
                   }
 
@@ -759,6 +806,13 @@ function iniciarEmailListener() {
                     }
 
                     // ✅ TODO BIEN - Enviar respuesta al cliente
+                    // Guard de dedup en el send-path: evita re-enviar reply al mismo hilo en < 30min
+                    if (yaRespondidoRecientemente(claveHilo, 30)) {
+                      logInfo(`🚫 dedup-reply suppressed: ya se respondió a este hilo en los últimos 30 min - De: ${destinatario}`);
+                      registrarDuplicado();
+                      return;
+                    }
+
                     agregarMensajeAHilo(claveHilo, 'bot', mensajeAEnviar);
                     registrarRespuestaEnviada(claveHilo);
 
@@ -1107,6 +1161,12 @@ module.exports = {
   esIntermediario,
   extraerEmailDelContenido,
   clasificarPorDominio,
+  claveIncidencia,
+  yaEscaladaIncidenciaReciente,
+  registrarIncidenciaEscalada,
+  hashMensaje,
+  esMensajeDuplicado,
+  detectarClienteTienda,
   _setResendForTesting,
   _resetResend
 };
