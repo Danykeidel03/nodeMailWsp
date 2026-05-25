@@ -445,3 +445,54 @@ describe('clasificarPorDominio — Judge.me ≤2 estrellas (T6.1)', () => {
     expect(result.tipo).toBe('HUMANO');
   });
 });
+
+// ---------------------------------------------------------------------------
+// T13 — Smoke: escalarASoporte y enviarRecordatorio
+// ---------------------------------------------------------------------------
+
+describe('email — escalarASoporte smoke test', () => {
+  test('escalarASoporte NO está en el módulo.exports (es función interna)', async () => {
+    // escalarASoporte is intentionally not exported — it is an internal helper.
+    // This test documents that design decision.
+    const emailMod = await import('../email.js');
+    expect(emailMod.escalarASoporte).toBeUndefined();
+  });
+});
+
+describe('email — enviarRecordatorio smoke test', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('enviarRecordatorio está exportado y es una función async', async () => {
+    const { enviarRecordatorio } = await import('../email.js');
+    expect(typeof enviarRecordatorio).toBe('function');
+    // Should return a Promise (async)
+    expect(enviarRecordatorio.constructor.name).toBe('AsyncFunction');
+  });
+
+  test('enviarRecordatorio llama reenviarCorreo con formato [RECORDATORIO 72h]', async () => {
+    const { enviarRecordatorio, reenviarCorreo, _setResendForTesting, _resetResend } = await import('../email.js');
+
+    // Mock Resend so no real HTTP call
+    const mockSend = vi.fn().mockResolvedValue({ data: { id: 'test-id' }, error: null });
+    _setResendForTesting({ emails: { send: mockSend } });
+
+    const entrada = {
+      remitente: 'cliente@ejemplo.com',
+      asunto: 'Mi pedido perdido',
+      resumen: 'No recibí el paquete'
+    };
+
+    await enviarRecordatorio(entrada);
+
+    expect(mockSend).toHaveBeenCalledOnce();
+    const callArgs = mockSend.mock.calls[0][0];
+    expect(callArgs.subject).toContain('[RECORDATORIO 72h]');
+    expect(callArgs.subject).toContain('Mi pedido perdido');
+    // replyTo should be the client's email
+    expect(callArgs.replyTo).toBe('cliente@ejemplo.com');
+
+    _resetResend();
+  });
+});

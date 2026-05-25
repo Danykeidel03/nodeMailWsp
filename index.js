@@ -2,7 +2,8 @@
 require('dotenv').config();
 const express = require('express');
 const crypto = require('node:crypto');
-const { iniciarEmailListener, mostrarUltimoEmail } = require('./email');
+const { iniciarEmailListener, mostrarUltimoEmail, enviarRecordatorio } = require('./email');
+const { iniciarCronRecordatorios } = require('./escalados');
 const { clasificarYResponder } = require('./classifier');
 const { logInfo, logError } = require('./logger');
 const { obtenerMetricas, mostrarMetricas } = require('./metricas');
@@ -294,8 +295,11 @@ app.listen(PORT, '0.0.0.0', () => {
   try {
     iniciarEmailListener();
     console.log('Email listener iniciado correctamente');
+
+    iniciarCronRecordatorios(enviarRecordatorio);
+    console.log('Cron de recordatorios iniciado correctamente');
   } catch (err) {
-    console.error('Error iniciando Email Listener:', err);
+    console.error('Error iniciando Email Listener / Cron:', err);
   }
 });
 

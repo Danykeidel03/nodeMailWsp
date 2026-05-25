@@ -15,6 +15,7 @@ const {
   registrarError,
   registrarTiempoRespuesta
 } = require('./metricas');
+const { registrarEscalado } = require('./escalados');
 const Imap = require('imap');
 
 let resend = new Resend(process.env.RESEND_API_KEY);
@@ -762,6 +763,7 @@ function iniciarEmailListener() {
                       registrarIntermediario();
                       logInfo(`⚠️ No se puede identificar destinatario real - se escala a humano`);
                       await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, []);
+                      registrarEscalado({ remitente: destinatario, asunto: subjectOriginal, resumen: texto });
                       return;
                     }
                   }
@@ -787,9 +789,7 @@ function iniciarEmailListener() {
                     logInfo(`👤 ESCALADO: ${clasificacionDominio.razon} - De: ${destinatario}`);
                     const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
                     const historialTemp = obtenerHistorialHilo(claveHiloTemp);
-                    registrarHiloEscalado(claveHiloTemp, 'soporte');
-                    registrarEmailEscalado('soporte');
-                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialTemp);
+                    await escalarASoporte({ claveHilo: claveHiloTemp, destinatario, texto, subjectOriginal, historial: historialTemp });
                     return;
                   }
 
@@ -806,9 +806,7 @@ function iniciarEmailListener() {
                     logInfo(`🚨 PROBLEMA ENTREGA: ${problemaEntrega.razon} - Escalando a SOPORTE - De: ${destinatario}`);
                     const claveHiloTemp = obtenerClaveHilo(destinatario, references, inReplyTo, messageId);
                     const historialTemp = obtenerHistorialHilo(claveHiloTemp);
-                    registrarHiloEscalado(claveHiloTemp, 'soporte');
-                    registrarEmailEscalado('soporte');
-                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialTemp);
+                    await escalarASoporte({ claveHilo: claveHiloTemp, destinatario, texto, subjectOriginal, historial: historialTemp });
                     return;
                   }
 
@@ -856,11 +854,8 @@ function iniciarEmailListener() {
                     if (esDominioLogistica(destinatario)) {
                       registrarIncidenciaEscalada(destinatario, subjectOriginal);
                     }
-                    registrarHiloEscalado(claveHilo, 'soporte');
-                    registrarEmailEscalado('soporte');
                     const historialCompleto = obtenerHistorialHilo(claveHilo);
-                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
-                    logInfo(`📧 Email derivado a SOPORTE desde ${destinatario}`);
+                    await escalarASoporte({ claveHilo, destinatario, texto, subjectOriginal, historial: historialCompleto, mensajeLog: `📧 Email derivado a SOPORTE desde ${destinatario}` });
                     return;
                   } else if (respuesta === 'SAMU') {
                     registrarHiloEscalado(claveHilo, 'samu');
@@ -870,11 +865,8 @@ function iniciarEmailListener() {
                     logInfo(`📧 Email derivado a SAMU desde ${destinatario}`);
                     return;
                   } else if (respuesta === 'NECESITA_PERSONA') {
-                    registrarHiloEscalado(claveHilo, 'soporte');
-                    registrarEmailEscalado('soporte');
                     const historialCompleto = obtenerHistorialHilo(claveHilo);
-                    await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
-                    logInfo(`👤 Email requiere atención humana de ${destinatario}`);
+                    await escalarASoporte({ claveHilo, destinatario, texto, subjectOriginal, historial: historialCompleto, mensajeLog: `👤 Email requiere atención humana de ${destinatario}` });
                     return;
                   } else if (respuesta === 'SIN_RESPUESTA') {
                     registrarEmailIgnorado('SIN_RESPUESTA');
@@ -896,6 +888,7 @@ function iniciarEmailListener() {
                       logError(destinatario, new Error('Estado interno detectado en string'), `⚠️ CRÍTICO: Intentó enviar estado interno "${respuesta}" al cliente - BLOQUEADO`);
                       const historialCompleto = obtenerHistorialHilo(claveHilo);
                       await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
+                      registrarEscalado({ remitente: destinatario, asunto: subjectOriginal, resumen: texto });
                       return;
                     }
                     mensajeAEnviar = respuesta;
@@ -914,6 +907,7 @@ function iniciarEmailListener() {
                       logError(destinatario, new Error('Mensaje con estado interno detectado'), `⚠️ CRÍTICO: Mensaje contiene estados internos - BLOQUEADO - Mensaje: ${mensajeAEnviar}`);
                       const historialCompleto = obtenerHistorialHilo(claveHilo);
                       await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historialCompleto);
+                      registrarEscalado({ remitente: destinatario, asunto: subjectOriginal, resumen: texto });
                       return;
                     }
 
@@ -1262,9 +1256,42 @@ function mostrarUltimoEmail() {
   imap.connect();
 }
 
+/**
+ * Wrapper para los 4 call sites estándar de escalado a soporte.
+ * Agrupa registrarHiloEscalado + registrarEmailEscalado + reenviarCorreo + registrarEscalado.
+ * NO usar en call sites que ya hacen su propio bookkeeping de hilo (guardrails).
+ */
+async function escalarASoporte({ claveHilo, destinatario, texto, subjectOriginal, historial, mensajeLog }) {
+  registrarHiloEscalado(claveHilo, 'soporte');
+  registrarEmailEscalado('soporte');
+  await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historial);
+  registrarEscalado({
+    remitente: destinatario,
+    asunto: subjectOriginal,
+    resumen: texto
+  });
+  if (mensajeLog) logInfo(mensajeLog);
+}
+
+/**
+ * Envía un recordatorio de 72h a soporte@frezzyks.com para una escalación pendiente.
+ * Usada por el cron de escalados.js (inyectada via iniciarCronRecordatorios).
+ * @param {{ remitente: string, asunto: string, resumen: string }} entrada
+ */
+async function enviarRecordatorio(entrada) {
+  return reenviarCorreo(
+    'soporte@frezzyks.com',
+    entrada.remitente,
+    entrada.resumen,
+    `[RECORDATORIO 72h] ${entrada.asunto}`,
+    []
+  );
+}
+
 module.exports = {
   iniciarEmailListener,
   mostrarUltimoEmail,
+  enviarRecordatorio,
   // Exportado para testing — no usar fuera de tests
   yaProcessadoContenido,
   yaRespondidoRecientemente,
