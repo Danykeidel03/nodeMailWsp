@@ -1261,7 +1261,7 @@ function mostrarUltimoEmail() {
  * Agrupa registrarHiloEscalado + registrarEmailEscalado + reenviarCorreo + registrarEscalado.
  * NO usar en call sites que ya hacen su propio bookkeeping de hilo (guardrails).
  */
-async function escalarASoporte({ claveHilo, destinatario, texto, subjectOriginal, historial, mensajeLog }) {
+async function escalarASoporte({ claveHilo, destinatario, texto, subjectOriginal, historial, mensajeLog = null }) {
   registrarHiloEscalado(claveHilo, 'soporte');
   registrarEmailEscalado('soporte');
   await reenviarCorreo('soporte@frezzyks.com', destinatario, texto, subjectOriginal, historial);
