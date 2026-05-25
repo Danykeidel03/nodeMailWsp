@@ -550,7 +550,7 @@ function claveIncidencia(remitente, asunto) {
 
   // Estrategia 1: extraer ID de tracking / pedido
   const trackingMatch =
-    s.match(/\b([a-z]{2,5}\d{8,}[a-z0-9]*)\b/i) ||   // Correos: PKCZG09800025120147014R
+    s.match(/\b([a-z]{2,5}\d{8,}[a-z]*)\b/i) ||       // Correos: PKCZG09800025120147014R
     s.match(/#(\d{4,})/) ||                             // pedido #5070
     s.match(/env[ií]o\s+(\d{6,})/i);                   // "Envío 123456"
 
