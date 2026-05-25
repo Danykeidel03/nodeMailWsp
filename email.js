@@ -235,12 +235,30 @@ function clasificarPorDominio(email, asunto, texto) {
     return { tipo: 'IGNORAR', razon: 'proveedor' };
   }
 
-  // Judge.me - reseñas 1 estrella requieren atención humana; el resto se ignora
+  /**
+   * Judge.me review escalation threshold
+   * Business rule: reviews with ≤2 stars require human attention (HUMANO).
+   * Reviews with ≥3 stars are silently ignored (positive/neutral).
+   * Source: SDD change weekly-audit-fixes-may2026 (Bug 6).
+   */
+  // Escalar reseñas ≤2 estrellas — decisión de negocio 2026-05-25
   if (emailLower.includes('judge.me')) {
-    const esResenaBaja = textoLower.includes('1 star') || textoLower.includes('1-star') ||
-      textoLower.includes('1 estrella') || textoLower.includes('2 star') || textoLower.includes('2-star');
+    const patronesResenaBaja = [
+      // Inglés singular y plural
+      '1 star', '1-star', '1 stars', '1-stars',
+      '2 star', '2-star', '2 stars', '2-stars',
+      // Español
+      '1 estrella', '2 estrellas',
+      // Numérico fracción
+      '1/5', '2/5',
+      // Numérico contexto rating
+      'rating: 1', 'rating: 2', 'rating:1', 'rating:2',
+      'rated 1', 'rated 2',
+      '1 out of 5', '2 out of 5',
+    ];
+    const esResenaBaja = patronesResenaBaja.some(p => textoLower.includes(p));
     if (esResenaBaja) {
-      return { tipo: 'HUMANO', razon: 'Reseña negativa de Judge.me - requiere atención' };
+      return { tipo: 'HUMANO', razon: 'Reseña ≤2 estrellas de Judge.me — escalada a humano' };
     }
     return { tipo: 'IGNORAR', razon: 'Notificación de Judge.me - no requiere respuesta' };
   }
@@ -269,11 +287,15 @@ function clasificarPorDominio(email, asunto, texto) {
     return { tipo: 'IGNORAR', razon: 'Email promocional con footer de newsletter detectado' };
   }
   
-  // Notificaciones internas de Frezzyks
-  if (emailLower.includes('frezzyks.com') && 
-      (asuntoLower.includes('new subscriber') || 
-       asuntoLower.includes('low stock') || 
-       asuntoLower.includes('pocas existencias'))) {
+  // Notificaciones internas de Frezzyks — incluyendo WP Mail SMTP (Fix 5 — T5.2)
+  if (emailLower.includes('frezzyks.com') &&
+      (asuntoLower.includes('new subscriber') ||
+       asuntoLower.includes('low stock') ||
+       asuntoLower.includes('pocas existencias') ||
+       asuntoLower.includes('wp mail smtp') ||         // Fix 5
+       asuntoLower.includes('email statistics') ||      // Fix 5
+       asuntoLower.includes('email log') ||             // Fix 5
+       asuntoLower.includes('wordpress'))) {            // Fix 5
     return { tipo: 'IGNORAR', razon: 'Notificación interna - no requiere respuesta' };
   }
   
@@ -460,7 +482,10 @@ function yaRespondidoRecientemente(threadId, minutos = 30) {
 function esNotificacionAutomaticaIgnorable(email) {
   const emailLower = email.toLowerCase();
   const dominios = [
-    'facebookmail.com', 'notification@facebook', 'notifications@facebook',
+    'facebookmail.com',
+    'business.facebook.com',           // Fix 3 — Meta Business (T3.2)
+    'business-updates.facebook.com',   // Fix 3 — Meta Business (T3.2)
+    'notification@facebook', 'notifications@facebook',
     'mail.instagram.com', 'notify.twitter.com', 'notifications.google.com',
     'accounts.google.com', 'no-reply@linkedin.com',
   ];
@@ -497,22 +522,91 @@ function esMensajeDuplicado(from, body) {
   return false;
 }
 
-// Dedup para incidencias recurrentes — ventana de 48h sin componente de fecha en la clave
+/**
+ * Helper para detectar dominios de logística conocidos.
+ * Se usa en el dedup simétrico del path classifier SOPORTE (Fix 2 — ADR-4).
+ * @param {string|null} email
+ * @returns {boolean}
+ */
+function esDominioLogistica(email) {
+  const dominios = ['correos.es', 'correosexpress.com', 'seur.', 'mrw.es', 'nacex.', 'gls-spain'];
+  return dominios.some(d => (email || '').toLowerCase().includes(d));
+}
+
+/**
+ * Genera una clave de deduplicación para incidencias recurrentes.
+ *
+ * Estrategia 1 (::id::): extrae tracking ID / número de pedido / "Envío NNN" del asunto.
+ *   → Mismo incidente = misma clave independientemente de decoración con fechas.
+ * Estrategia 2 (::subj::): fallback — asunto normalizado sin fechas ni números sueltos.
+ *   → TTL más corto (24h) para evitar sobre-supresión de incidentes distintos.
+ *
+ * Fix 2 — ADR-2 (lazy TTL) + ADR-3 (ID-extraction key).
+ */
 function claveIncidencia(remitente, asunto) {
   const r = remitente.toLowerCase().trim();
-  const s = (asunto || '').toLowerCase().replace(/^(re:|fwd?:)\s*/gi, '').trim();
-  return `${r}::${s}`;
+  const s = (asunto || '').toLowerCase();
+
+  // Estrategia 1: extraer ID de tracking / pedido
+  const trackingMatch =
+    s.match(/\b([a-z]{2,5}\d{8,}[a-z0-9]*)\b/i) ||   // Correos: PKCZG09800025120147014R
+    s.match(/#(\d{4,})/) ||                             // pedido #5070
+    s.match(/env[ií]o\s+(\d{6,})/i);                   // "Envío 123456"
+
+  if (trackingMatch) {
+    const id = (trackingMatch[1] || trackingMatch[2] || '').toLowerCase();
+    return `${r}::id::${id}`;
+  }
+
+  // Estrategia 2: asunto normalizado — eliminar RE:/FWD:, fechas, números sueltos
+  const subjectNorm = s
+    .replace(/^(re:|fwd?:)\s*/gi, '')
+    .replace(/\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}/g, '')  // fechas dd/mm/yyyy
+    .replace(/\b\d+\b/g, '')                              // números sueltos
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return `${r}::subj::${subjectNorm}`;
 }
 
+/**
+ * Lazy-TTL check para dedup de incidencias.
+ * TTL: 72h para claves con ID extraído (::id::), 24h para fallback (::subj::).
+ * Fix 2 — ADR-2: reemplaza setTimeout con timestamp-on-read.
+ */
 function yaEscaladaIncidenciaReciente(remitente, asunto) {
-  return incidenciasEscaladas.has(claveIncidencia(remitente, asunto));
+  const clave = claveIncidencia(remitente, asunto);
+  const registro = incidenciasEscaladas.get(clave);
+  if (!registro) return false;
+
+  const TTL = clave.includes('::id::')
+    ? 72 * 60 * 60 * 1000   // 72h para incidencias con ID concreto
+    : 24 * 60 * 60 * 1000;  // 24h para fallback normalizado
+
+  if (Date.now() - registro.timestamp > TTL) {
+    incidenciasEscaladas.delete(clave);
+    return false;
+  }
+  return true;
 }
 
+/**
+ * Registra una incidencia escalada con timestamp en lugar de setTimeout.
+ * El sweep de entradas obsoletas ocurre aquí de forma oportunista.
+ * Fix 2 — ADR-2.
+ */
 function registrarIncidenciaEscalada(remitente, asunto) {
   const clave = claveIncidencia(remitente, asunto);
   incidenciasEscaladas.set(clave, { timestamp: Date.now() });
-  // El TTL de 48h es el único mecanismo de tiempo — la clave no incluye fecha
-  setTimeout(() => incidenciasEscaladas.delete(clave), 48 * 60 * 60 * 1000);
+
+  // Sweep oportunístico: eliminar entradas más viejas que 72h (TTL máximo)
+  const maxTTL = 72 * 60 * 60 * 1000;
+  const ahora = Date.now();
+  for (const [k, v] of incidenciasEscaladas.entries()) {
+    if (ahora - v.timestamp > maxTTL) {
+      incidenciasEscaladas.delete(k);
+    }
+  }
 }
 
 // Registrar que se envió una respuesta
@@ -596,7 +690,17 @@ function iniciarEmailListener() {
                   destinatario = parsed.from?.value?.[0]?.address;
 
                   // 🚫 BLOQUEAR LOOP: No procesar emails internos de Frezzyks
-                  const emailsInternosFrezzyks = ['contacto@frezzyks.com', 'soporte@frezzyks.com', 'samu@frezzyks.com', 'ventas@frezzyks.com'];
+                  // Fix 5 (T5.2) — se agregan info@, no-reply@, noreply@, wordpress@ (ADR-7: lista explícita, no dominio-wide)
+                  const emailsInternosFrezzyks = [
+                    'contacto@frezzyks.com',
+                    'soporte@frezzyks.com',
+                    'samu@frezzyks.com',
+                    'ventas@frezzyks.com',
+                    'info@frezzyks.com',           // Fix 5 — WP Mail SMTP + interno
+                    'no-reply@frezzyks.com',       // Fix 5 — defensivo
+                    'noreply@frezzyks.com',        // Fix 5 — defensivo
+                    'wordpress@frezzyks.com',      // Fix 5 — WP Mail SMTP sender
+                  ];
                   if (destinatario && emailsInternosFrezzyks.includes(destinatario.toLowerCase())) {
                     logInfo(`🚫 BLOQUEADO: Email interno de ${destinatario} - evitando loop`);
                     registrarEmailIgnorado(`loop ${destinatario}`);
@@ -744,6 +848,14 @@ function iniciarEmailListener() {
                   const ESTADOS_INTERNOS = ['SOPORTE', 'SAMU', 'NECESITA_PERSONA', 'SIN_RESPUESTA'];
 
                   if (respuesta === 'SOPORTE') {
+                    // Dedup simétrico: no re-escalar incidencia logística activa dentro de 72h (T2.4)
+                    if (esDominioLogistica(destinatario) && yaEscaladaIncidenciaReciente(destinatario, subjectOriginal)) {
+                      logInfo(`🔁 INCIDENCIA LOGÍSTICA YA ESCALADA (classifier): ${destinatario} - sin nueva notificación`);
+                      return;
+                    }
+                    if (esDominioLogistica(destinatario)) {
+                      registrarIncidenciaEscalada(destinatario, subjectOriginal);
+                    }
                     registrarHiloEscalado(claveHilo, 'soporte');
                     registrarEmailEscalado('soporte');
                     const historialCompleto = obtenerHistorialHilo(claveHilo);
@@ -1159,11 +1271,13 @@ module.exports = {
   enviarCorreo,
   reenviarCorreo,
   esIntermediario,
+  esNotificacionAutomaticaIgnorable,  // Fix 3 — export para tests T3.1
   extraerEmailDelContenido,
   clasificarPorDominio,
   claveIncidencia,
   yaEscaladaIncidenciaReciente,
   registrarIncidenciaEscalada,
+  esDominioLogistica,                 // Fix 2 — export para tests T2.3
   hashMensaje,
   esMensajeDuplicado,
   detectarClienteTienda,

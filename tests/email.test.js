@@ -1,5 +1,5 @@
 // tests/email.test.js
-import { describe, expect, vi, beforeEach } from 'vitest';
+import { describe, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   esIntermediario,
   extraerEmailDelContenido,
@@ -10,6 +10,7 @@ import {
   hashMensaje,
   esMensajeDuplicado,
   detectarClienteTienda,
+  esDominioLogistica,
 } from '../email.js';
 
 
@@ -265,5 +266,182 @@ describe('dedup asimétrico — send-path vs inbound', () => {
     esMensajeDuplicado(from, 'Primer mensaje del cliente');
     const resultado = esMensajeDuplicado(from, 'Follow-up con contenido completamente distinto');
     expect(resultado).toBe(false);
+  });
+});
+
+// ============================================================
+// T2.1 — claveIncidencia: ID-extraction strategy (RED)
+// ============================================================
+describe('claveIncidencia — ID extraction + date-strip (T2.1)', () => {
+  it('extrae tracking ID de formato Correos del asunto → clave usa ::id::', () => {
+    const clave = claveIncidencia('noreply@correos.es', 'Correos - PKCZG09800025120147014R - Incidencia');
+    expect(clave).toContain('::id::');
+    expect(clave).toContain('pkczg09800025120147014r');
+  });
+
+  it('extrae número de pedido del asunto → clave usa ::id::', () => {
+    const clave = claveIncidencia('noreply@correos.es', 'Problema con pedido #5070');
+    expect(clave).toContain('::id::');
+    expect(clave).toContain('5070');
+  });
+
+  it('sin ID en asunto → clave usa ::subj:: y elimina fechas', () => {
+    const clave = claveIncidencia('noreply@correos.es', 'Aviso de incidencia 25/05/2026 pendiente');
+    expect(clave).toContain('::subj::');
+    expect(clave).not.toContain('25/05/2026');
+  });
+
+  it('dos asuntos con mismo incidente mismo remitente y fechas distintas → misma clave', () => {
+    const c1 = claveIncidencia('noreply@correos.es', 'Aviso incidencia PKCZG09800025120147014R - 20/05/2026');
+    const c2 = claveIncidencia('noreply@correos.es', 'Aviso incidencia PKCZG09800025120147014R - 25/05/2026');
+    expect(c1).toBe(c2);
+  });
+
+  it('remitentes distintos → claves distintas aunque asunto sea el mismo', () => {
+    const c1 = claveIncidencia('correos@correos.es', 'Incidencia PKCZG09800025120147014R');
+    const c2 = claveIncidencia('seur@seur.com', 'Incidencia PKCZG09800025120147014R');
+    expect(c1).not.toBe(c2);
+  });
+});
+
+// ============================================================
+// T2.2 — TTL 72h lazy check (RED)
+// ============================================================
+describe('yaEscaladaIncidenciaReciente — TTL 72h boundary (T2.2)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('retorna true dentro de las 72h para clave con ID de tracking Correos', () => {
+    const remitente = `ttl72-${Date.now()}@correos.es`;
+    // Correos tracking: 2-5 letras + 8+ dígitos
+    const asunto = `Incidencia EN12345678ES aviso de recogida`;
+    registrarIncidenciaEscalada(remitente, asunto);
+    vi.advanceTimersByTime(71 * 60 * 60 * 1000); // 71h — dentro de TTL 72h
+    expect(yaEscaladaIncidenciaReciente(remitente, asunto)).toBe(true);
+  });
+
+  it('retorna false después de 72h para clave con ID de tracking Correos', () => {
+    const remitente = `ttl72-exp-${Date.now()}@correos.es`;
+    const asunto = `Incidencia EN98765432ES expirado`;
+    registrarIncidenciaEscalada(remitente, asunto);
+    vi.advanceTimersByTime(73 * 60 * 60 * 1000); // 73h — fuera de TTL 72h
+    expect(yaEscaladaIncidenciaReciente(remitente, asunto)).toBe(false);
+  });
+
+  it('retorna true a las 48h (dentro de la ventana 72h — antes el TTL era 48h)', () => {
+    const remitente = `ttl48-${Date.now()}@correos.es`;
+    // Asunto sin ID → clave ::subj::, TTL 24h — pero a las 48h ya expiró
+    // Para testear la ventana 72h, usar asunto CON ID de pedido
+    const asunto = `Problema con pedido #${Math.floor(Date.now() / 1000)} incidencia`;
+    registrarIncidenciaEscalada(remitente, asunto);
+    vi.advanceTimersByTime(48 * 60 * 60 * 1000); // 48h — dentro de TTL ::id:: (72h)
+    expect(yaEscaladaIncidenciaReciente(remitente, asunto)).toBe(true);
+  });
+});
+
+// ============================================================
+// T2.3 — esDominioLogistica helper (RED)
+// ============================================================
+describe('esDominioLogistica (T2.3)', () => {
+  test.each([
+    ['info@correos.es', true],
+    ['noreply@correosexpress.com', true],
+    ['envios@seur.com', true],
+    ['avisos@mrw.es', true],
+    ['notificaciones@nacex.es', true],
+    ['cliente@gmail.com', false],
+    ['pedidos@tienda.com', false],
+    [null, false],
+    ['', false],
+  ])('esDominioLogistica("%s") -> %s', (email, expected) => {
+    expect(esDominioLogistica(email)).toBe(expected);
+  });
+});
+
+// ============================================================
+// T3.1 — Meta Business ignorables (RED)
+// ============================================================
+describe('esNotificacionAutomaticaIgnorable — Meta Business (T3.1)', () => {
+  it('business.facebook.com → ignorable', () => {
+    const { esNotificacionAutomaticaIgnorable } = require('../email.js');
+    expect(esNotificacionAutomaticaIgnorable('noreply@business.facebook.com')).toBe(true);
+  });
+
+  it('business-updates.facebook.com → ignorable', () => {
+    const { esNotificacionAutomaticaIgnorable } = require('../email.js');
+    expect(esNotificacionAutomaticaIgnorable('updates@business-updates.facebook.com')).toBe(true);
+  });
+
+  it('facebookmail.com sigue siendo ignorable (regresión)', () => {
+    const { esNotificacionAutomaticaIgnorable } = require('../email.js');
+    expect(esNotificacionAutomaticaIgnorable('noreply@facebookmail.com')).toBe(true);
+  });
+
+  it('gmail.com → NO ignorable (no es Meta)', () => {
+    const { esNotificacionAutomaticaIgnorable } = require('../email.js');
+    expect(esNotificacionAutomaticaIgnorable('usuario@gmail.com')).toBe(false);
+  });
+});
+
+// ============================================================
+// T5.1 — info@frezzyks.com → IGNORAR (RED)
+// ============================================================
+describe('Loop-blocker — info@frezzyks.com (T5.1)', () => {
+  it('emailsInternosFrezzyks contiene info@frezzyks.com en el source', () => {
+    const fs = require('fs');
+    const source = fs.readFileSync(require.resolve('../email.js'), 'utf8');
+    expect(source).toContain("'info@frezzyks.com'");
+  });
+
+  it('clasificarPorDominio: info@frezzyks.com con asunto WP Mail SMTP → IGNORAR', () => {
+    const result = clasificarPorDominio(
+      'info@frezzyks.com',
+      'WP Mail SMTP: Email Statistics',
+      'Resumen de emails enviados esta semana'
+    );
+    expect(result.tipo).toBe('IGNORAR');
+  });
+
+  it('daniel@frezzyks.com con consulta de cliente → no bloqueado por clasificarPorDominio (ADR-7)', () => {
+    const result = clasificarPorDominio(
+      'daniel@frezzyks.com',
+      'Consulta sobre pedido',
+      'Hola, quiero saber el estado de mi pedido'
+    );
+    expect(result.tipo).toBe('PROCESAR');
+  });
+});
+
+// ============================================================
+// T6.1 — Judge.me ≤2 star patterns (RED)
+// ============================================================
+describe('clasificarPorDominio — Judge.me ≤2 estrellas (T6.1)', () => {
+  test.each([
+    // ≤2 → HUMANO
+    ['reviews@judge.me', 'Nueva reseña', 'You received a 2 stars review', 'HUMANO', '2 stars plural'],
+    ['reviews@judge.me', 'Nueva reseña', 'You received a 2-star review', 'HUMANO', '2-star hyphenated'],
+    ['reviews@judge.me', 'Nueva reseña', 'Rating: 2 out of 5', 'HUMANO', '2 out of 5'],
+    ['reviews@judge.me', 'Nueva reseña', 'This is a 2/5 review', 'HUMANO', '2/5 numeric'],
+    ['reviews@judge.me', 'Nueva reseña', 'rating: 2', 'HUMANO', 'rating: 2'],
+    ['reviews@judge.me', 'Nueva reseña', 'Rated 2 out of 5', 'HUMANO', 'rated 2'],
+    ['reviews@judge.me', 'Nueva reseña', 'You received a 1 stars review', 'HUMANO', '1 stars plural'],
+    ['reviews@judge.me', 'Nueva reseña', 'This is a 1/5 review', 'HUMANO', '1/5 numeric'],
+    // ≥3 → IGNORAR
+    ['reviews@judge.me', 'Nueva reseña', 'You received a 5 stars review!', 'IGNORAR', '5 stars'],
+    ['reviews@judge.me', 'Nueva reseña', 'You received a 3 stars review', 'IGNORAR', '3 stars'],
+    ['reviews@judge.me', 'Nueva reseña', 'You received a 4 star review', 'IGNORAR', '4 star'],
+  ])('judge.me "%s" body "%s" → %s (%s)', (email, asunto, texto, expected, _label) => {
+    const result = clasificarPorDominio(email, asunto, texto);
+    expect(result.tipo).toBe(expected);
+  });
+
+  it('judge.me 1 star (singular, ya existente) sigue siendo HUMANO (regresión)', () => {
+    const result = clasificarPorDominio('reviews@judge.me', 'Reseña', 'You received a 1 star review');
+    expect(result.tipo).toBe('HUMANO');
   });
 });

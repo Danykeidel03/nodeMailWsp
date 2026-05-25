@@ -25,6 +25,58 @@ function _resetOpenAI() {
 // Estados internos que NUNCA deben enviarse al cliente
 const ESTADOS_INTERNOS = ['SOPORTE', 'SAMU', 'NECESITA_PERSONA', 'SIN_RESPUESTA'];
 
+// Patrones para detección de estados internos: token-anchored (Fix 4 — ADR-5)
+// Usa /^STATE\b/i para que SAMU no matchee SAMUel, etc.
+const ESTADO_PATTERNS = {
+  NECESITA_PERSONA: /^NECESITA_PERSONA\b/i,
+  SIN_RESPUESTA:    /^SIN_RESPUESTA\b/i,
+  SOPORTE:          /^SOPORTE\b/i,
+  SAMU:             /^SAMU\b/i,
+};
+
+/**
+ * Detecta el estado interno de la respuesta del LLM usando matching anclado al inicio
+ * de cada línea. Esto evita que texto explicativo mid-sentence active un estado.
+ * @param {string|null} respuesta
+ * @returns {string|null} El estado detectado o null
+ */
+function detectarEstadoInterno(respuesta) {
+  if (!respuesta) return null;
+  // Evaluar línea por línea para que "SAMU\nexplicación" y "texto\nSIN_RESPUESTA" ambos funcionen
+  const lineas = respuesta.split('\n');
+  for (const linea of lineas) {
+    const trimmed = linea.trim();
+    if (!trimmed) continue;
+    for (const [estado, regex] of Object.entries(ESTADO_PATTERNS)) {
+      if (regex.test(trimmed)) return estado;
+    }
+  }
+  return null;
+}
+
+/**
+ * Detecta si el cuerpo del email contiene señales de intención de seguimiento/tracking.
+ * Se aplica ANTES de buscar números de seguimiento en el asunto.
+ * @param {string|null} texto - Cuerpo del email
+ * @returns {boolean}
+ */
+function detectarIntencionSeguimiento(texto) {
+  if (!texto) return false;
+  const t = texto.toLowerCase();
+  const senales = [
+    'seguimiento', 'tracking', 'rastreo', 'rastrear',
+    'donde está', 'dónde está', 'donde esta', 'dónde esta',
+    'estado del pedido', 'estado de mi pedido', 'estado del envío',
+    'en tránsito', 'en transito', 'cuándo llega', 'cuando llega',
+    'no me ha llegado', 'no ha llegado', 'no llegó', 'no llego',
+    'paquete', 'mi envío', 'mi envio',
+    // NOTA: 'mi pedido' se omite — es demasiado genérico y dispara falsos positivos
+    // en consultas de devolución, pedido incompleto, etc.
+    'aún no recibí', 'aun no recibi', 'todavía no llegó', 'todavia no llego'
+  ];
+  return senales.some(s => t.includes(s));
+}
+
 /**
  * Detecta si el cliente está frustrado basándose en patrones de texto
  */
@@ -186,23 +238,31 @@ async function clasificarYResponder(mensaje, destinatario, asunto, historialConv
     return 'SOPORTE';
   }
   
-  // === OBTENER INFORMACIÓN DE CONTEXTO ===
-  const textoCompleto = `${mensaje} ${asunto || ''}`;
+  // === OBTENER INFORMACIÓN DE CONTEXTO (Fix 1 — ADR-1) ===
+  // Body es la fuente de verdad para intención. El asunto es contexto secundario gateado.
+  const cuerpoLimpio = mensaje;
+  const intentTracking = detectarIntencionSeguimiento(cuerpoLimpio);
   let infoPedido = '';
   let infoSeguimiento = '';
   let estadoCompletoDisponible = false;
-  
-  // Buscar número de pedido
-  const numeroPedido = extraerNumeroPedido(textoCompleto);
+
+  // Buscar número de pedido — body primero, asunto como fallback SI hay intent
+  let numeroPedido = extraerNumeroPedido(cuerpoLimpio);
+  if (!numeroPedido && intentTracking) {
+    numeroPedido = extraerNumeroPedido(asunto || '');
+  }
   if (numeroPedido) {
     const resultado = await obtenerInfoPedido(numeroPedido, destinatario);
     infoPedido = resultado.texto;
     estadoCompletoDisponible = resultado.estadoCompletoDisponible;
   }
-  
-  // Buscar número de seguimiento (solo si no tenemos estado completo del pedido)
-  if (!estadoCompletoDisponible) {
-    const numeroSeguimiento = extraerNumeroSeguimiento(textoCompleto);
+
+  // Buscar número de seguimiento — SOLO si hay intent, body primero, asunto como fallback
+  if (!estadoCompletoDisponible && intentTracking) {
+    let numeroSeguimiento = extraerNumeroSeguimiento(cuerpoLimpio);
+    if (!numeroSeguimiento) {
+      numeroSeguimiento = extraerNumeroSeguimiento(asunto || '');
+    }
     if (numeroSeguimiento) {
       infoSeguimiento = await obtenerInfoSeguimiento(numeroSeguimiento);
     }
@@ -229,11 +289,9 @@ async function clasificarYResponder(mensaje, destinatario, asunto, historialConv
 
   const respuesta = completion.choices[0].message.content.trim();
 
-  // === DETECTAR ESTADOS INTERNOS ===
-  if (respuesta.includes('NECESITA_PERSONA')) return 'NECESITA_PERSONA';
-  if (respuesta.includes('SIN_RESPUESTA')) return 'SIN_RESPUESTA';
-  if (respuesta.includes('SOPORTE')) return 'SOPORTE';
-  if (respuesta.includes('SAMU')) return 'SAMU';
+  // === DETECTAR ESTADOS INTERNOS (Fix 4 — ADR-5: token-anchored) ===
+  const estado = detectarEstadoInterno(respuesta);
+  if (estado) return estado;
 
   return {
     destinatario,
@@ -251,6 +309,10 @@ module.exports = {
   extraerNumeroSeguimiento,
   obtenerInfoPedido,
   obtenerInfoSeguimiento,
+  // Fix 1 — intent gate (T1.1, T1.2)
+  detectarIntencionSeguimiento,
+  // Fix 4 — token-anchored state match (T4.1)
+  detectarEstadoInterno,
   // Exportado para testing — no usar fuera de tests
   _setOpenAIForTesting,
   _resetOpenAI
