@@ -981,8 +981,9 @@ function iniciarEmailListener() {
         console.log(`[IMAP] Reintentando conexión (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) en ${delay}ms...`);
         setTimeout(conectar, delay);
       } else {
-        console.error('[IMAP] ❌ Máximo de intentos de reconexión alcanzado. El listener IMAP se ha detenido.');
-        logError('IMAP_RECONNECT', new Error('Max reconnect attempts reached'), 'IMAP listener detenido permanentemente');
+        console.error('[IMAP] ❌ Máximo de intentos de reconexión alcanzado. Reiniciando proceso para que Railway lo levante de nuevo.');
+        logError('IMAP_RECONNECT', new Error('Max reconnect attempts reached'), 'IMAP listener detenido permanentemente — forzando reinicio del proceso');
+        process.exit(1);
       }
     });
 
