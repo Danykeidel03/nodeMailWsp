@@ -16,7 +16,8 @@ const {
   registrarTiempoRespuesta
 } = require('./metricas');
 const { registrarEscalado } = require('./escalados');
-let Imap = require('imap');
+const Imap = require('imap');
+let ImapParaTesting = null;
 
 let resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -30,12 +31,14 @@ function _resetResend() {
 
 // Permite inyectar un constructor Imap alternativo en tests (no usar en producción).
 // require('imap') no puede mockearse con vi.mock — Vitest solo intercepta import/import(),
-// no el require() nativo de CommonJS que usa este archivo.
+// no el require() nativo de CommonJS que usa este archivo. Tampoco se puede reasignar
+// directamente la variable de require('imap'): TS (checkJs) la trata como un import
+// de solo lectura y rompe el typecheck (TS2632).
 function _setImapForTesting(mockImap) {
-  Imap = mockImap;
+  ImapParaTesting = mockImap;
 }
 function _resetImap() {
-  Imap = require('imap');
+  ImapParaTesting = null;
 }
 
 // Almacenamiento temporal de hilos de conversación
@@ -644,7 +647,8 @@ function iniciarEmailListener() {
     console.log('[IMAP] Intentando conectar...');
 
     // Se crea un nuevo objeto Imap en cada intento — los objetos IMAP no son reutilizables
-    const imap = new Imap({
+    const ImapCtor = ImapParaTesting || Imap;
+    const imap = new ImapCtor({
       user: process.env.EMAIL_USER,
       password: process.env.EMAIL_PASS,
       host: 'frezzyks-com.correoseguro.dinaserver.com',
