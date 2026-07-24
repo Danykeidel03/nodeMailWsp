@@ -16,7 +16,7 @@ const {
   registrarTiempoRespuesta
 } = require('./metricas');
 const { registrarEscalado } = require('./escalados');
-const Imap = require('imap');
+let Imap = require('imap');
 
 let resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -26,6 +26,16 @@ function _setResendForTesting(mockResend) {
 }
 function _resetResend() {
   resend = new Resend(process.env.RESEND_API_KEY);
+}
+
+// Permite inyectar un constructor Imap alternativo en tests (no usar en producción).
+// require('imap') no puede mockearse con vi.mock — Vitest solo intercepta import/import(),
+// no el require() nativo de CommonJS que usa este archivo.
+function _setImapForTesting(mockImap) {
+  Imap = mockImap;
+}
+function _resetImap() {
+  Imap = require('imap');
 }
 
 // Almacenamiento temporal de hilos de conversación
@@ -973,8 +983,16 @@ function iniciarEmailListener() {
       logError('IMAP_CONNECTION', err, 'Error de conexión IMAP');
     });
 
-    imap.once('end', () => {
-      console.log('[IMAP] 🔌 Conexión cerrada');
+    let desconexionManejada = false;
+
+    // 'end' solo dispara con un FIN limpio del servidor; 'close' es el único evento
+    // garantizado en cualquier desconexión (timeout, RST, corte abrupto). Ambos pueden
+    // dispararse para el mismo corte, así que el guard evita reconectar dos veces.
+    function manejarDesconexion(origen) {
+      if (desconexionManejada) return;
+      desconexionManejada = true;
+
+      console.log(`[IMAP] 🔌 Conexión cerrada (evento: ${origen})`);
       reconnectAttempts++;
       if (reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
         const delay = Math.min(5000 * Math.pow(2, reconnectAttempts - 1), 60000);
@@ -985,11 +1003,10 @@ function iniciarEmailListener() {
         logError('IMAP_RECONNECT', new Error('Max reconnect attempts reached'), 'IMAP listener detenido permanentemente — forzando reinicio del proceso');
         process.exit(1);
       }
-    });
+    }
 
-    imap.on('close', () => {
-      console.log('[IMAP] Evento close disparado');
-    });
+    imap.once('end', () => manejarDesconexion('end'));
+    imap.once('close', () => manejarDesconexion('close'));
 
     try {
       imap.connect();
@@ -1310,5 +1327,7 @@ module.exports = {
   esMensajeDuplicado,
   detectarClienteTienda,
   _setResendForTesting,
-  _resetResend
+  _resetResend,
+  _setImapForTesting,
+  _resetImap
 };

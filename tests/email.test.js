@@ -496,3 +496,67 @@ describe('email — enviarRecordatorio smoke test', () => {
     _resetResend();
   });
 });
+
+// ============================================================
+// Bugfix — reconexión IMAP en evento 'close' sin 'end' previo
+// ============================================================
+describe('iniciarEmailListener — reconexión en evento close (bugfix)', () => {
+  let instances;
+  let FakeImap;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+
+    const { EventEmitter } = require('events');
+    instances = [];
+    FakeImap = class extends EventEmitter {
+      constructor() {
+        super();
+        instances.push(this);
+      }
+      connect() {}
+      end() {}
+      openBox() {}
+      addFlags() {}
+    };
+
+    const { _setImapForTesting } = require('../email.js');
+    _setImapForTesting(FakeImap);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    const { _resetImap } = require('../email.js');
+    _resetImap();
+  });
+
+  test("'close' sin 'end' previo dispara un segundo intento de conexión", () => {
+    const { iniciarEmailListener } = require('../email.js');
+
+    iniciarEmailListener();
+    expect(instances.length).toBe(1);
+
+    // Corte abrupto real: el servidor tira el socket sin FIN limpio — solo 'close' dispara
+    instances[0].emit('close');
+
+    vi.advanceTimersByTime(5000); // backoff del primer reintento: 5000 * 2^0
+
+    expect(instances.length).toBe(2);
+  });
+
+  test("'end' y 'close' para el mismo corte NO duplican el reintento", () => {
+    const { iniciarEmailListener } = require('../email.js');
+
+    iniciarEmailListener();
+    const primeraConexion = instances[0];
+
+    // Corte limpio: node-imap puede disparar ambos eventos para la misma desconexión
+    primeraConexion.emit('end');
+    primeraConexion.emit('close');
+
+    vi.advanceTimersByTime(5000);
+
+    // Sin el guard esto crearía 2 conexiones nuevas (una por cada evento) en vez de 1
+    expect(instances.length).toBe(2);
+  });
+});
