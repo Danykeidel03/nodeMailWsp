@@ -83,6 +83,45 @@ function extraerDatosFormulario(texto) {
   return Object.keys(campos).length > 0 ? campos : null;
 }
 
+// Campo del objeto extraído por extraerDatosFormulario -> etiqueta mostrada en el bloque
+const ETIQUETAS_CAMPOS_FORMULARIO = [
+  ['nombre', 'Nombre'],
+  ['email', 'Email'],
+  ['telefono', 'Teléfono'],
+  ['ciudad', 'Ciudad'],
+  ['tipo', 'Tipo de negocio'],
+  ['tipoCliente', 'Tipo de cliente'],
+  ['intencion', 'Intención/consulta']
+];
+
+/**
+ * Construye el bloque "DATOS YA CONOCIDOS DEL FORMULARIO" a partir de los
+ * campos detectados en el primer mensaje. Vacío si no hay datos.
+ */
+function construirBloqueFormulario(datosFormulario) {
+  if (!datosFormulario) return '';
+
+  const lineas = ETIQUETAS_CAMPOS_FORMULARIO
+    .filter(([campo]) => datosFormulario[campo])
+    .map(([campo, etiqueta]) => `${etiqueta}: ${datosFormulario[campo]}\n`)
+    .join('');
+
+  return `--- DATOS YA CONOCIDOS DEL FORMULARIO ---\n${lineas}--- FIN DE DATOS ---\n`;
+}
+
+/**
+ * Construye el bloque de historial de conversación previa. Vacío si no hay historial.
+ */
+function construirContextoConversacion(historialConversacion) {
+  if (historialConversacion.length === 0) return '';
+
+  const mensajes = historialConversacion
+    .map((msg) => `${msg.rol === 'bot' ? 'TÚ (Bot)' : 'Cliente'}: ${msg.texto}\n`)
+    .join('');
+
+  return `\n--- HISTORIAL DE LA CONVERSACIÓN ---\n${mensajes}--- FIN DEL HISTORIAL ---\n\n`;
+}
+
 /**
  * Construye el prompt completo con variables dinámicas
  */
@@ -96,60 +135,20 @@ function construirPrompt(opciones = {}) {
 
   let prompt = cargarPromptSistema();
 
-  // Construir bloque de datos de formulario si el primer mensaje los contiene
-  let bloqueFormulario = '';
   const primerMensaje = historialConversacion[0]?.texto;
   const datosFormulario = extraerDatosFormulario(primerMensaje);
-  if (datosFormulario) {
-    bloqueFormulario = '--- DATOS YA CONOCIDOS DEL FORMULARIO ---\n';
-    if (datosFormulario.nombre) bloqueFormulario += `Nombre: ${datosFormulario.nombre}\n`;
-    if (datosFormulario.email) bloqueFormulario += `Email: ${datosFormulario.email}\n`;
-    if (datosFormulario.telefono) bloqueFormulario += `Teléfono: ${datosFormulario.telefono}\n`;
-    if (datosFormulario.ciudad) bloqueFormulario += `Ciudad: ${datosFormulario.ciudad}\n`;
-    if (datosFormulario.tipo) bloqueFormulario += `Tipo de negocio: ${datosFormulario.tipo}\n`;
-    if (datosFormulario.tipoCliente) bloqueFormulario += `Tipo de cliente: ${datosFormulario.tipoCliente}\n`;
-    if (datosFormulario.intencion) bloqueFormulario += `Intención/consulta: ${datosFormulario.intencion}\n`;
-    bloqueFormulario += '--- FIN DE DATOS ---\n';
-  }
+  const bloqueFormulario = construirBloqueFormulario(datosFormulario);
+  const contextoConversacion = construirContextoConversacion(historialConversacion);
+  const infoArchivosAdjuntos = infoAdjuntos?.tieneAdjuntos ? infoAdjuntos.resumen : '';
 
-  // Construir contexto de conversación previa
-  let contextoConversacion = '';
-  if (historialConversacion.length > 0) {
-    contextoConversacion = '\n--- HISTORIAL DE LA CONVERSACIÓN ---\n';
-    historialConversacion.forEach((msg) => {
-      contextoConversacion += `${msg.rol === 'bot' ? 'TÚ (Bot)' : 'Cliente'}: ${msg.texto}\n`;
-    });
-    contextoConversacion += '--- FIN DEL HISTORIAL ---\n\n';
-  }
-
-  // Construir información de adjuntos
-  let infoArchivosAdjuntos = '';
-  if (infoAdjuntos?.tieneAdjuntos) {
-    infoArchivosAdjuntos = infoAdjuntos.resumen;
-  }
-
-  // Agregar secciones dinámicas al prompt (bloque de formulario va antes del historial)
-  const seccionesDinamicas = [];
-
-  if (bloqueFormulario) {
-    seccionesDinamicas.push(bloqueFormulario);
-  }
-
-  if (contextoConversacion) {
-    seccionesDinamicas.push(contextoConversacion);
-  }
-
-  if (infoArchivosAdjuntos) {
-    seccionesDinamicas.push(infoArchivosAdjuntos);
-  }
-
-  if (infoPedido) {
-    seccionesDinamicas.push('INFO PEDIDO PARA EL CLIENTE:\n' + infoPedido);
-  }
-
-  if (infoSeguimiento) {
-    seccionesDinamicas.push(infoSeguimiento);
-  }
+  // Bloque de formulario va antes del historial
+  const seccionesDinamicas = [
+    bloqueFormulario,
+    contextoConversacion,
+    infoArchivosAdjuntos,
+    infoPedido ? 'INFO PEDIDO PARA EL CLIENTE:\n' + infoPedido : '',
+    infoSeguimiento
+  ].filter(Boolean);
 
   if (seccionesDinamicas.length > 0) {
     prompt += '\n\n---\n\n## Contexto de esta conversación:\n\n' + seccionesDinamicas.join('\n\n');
